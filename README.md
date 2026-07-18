@@ -32,9 +32,16 @@ building — with your edits persisted across reloads.
 
 If your browser refuses pointer lock (some extensions and embedded contexts
 block it silently), the game switches to **drag-to-look** on its own: drag
-with the left button to look around, tap to break. And if startup fails
-outright — no WebGL, usually — the menu says exactly what went wrong
-instead of leaving a button that does nothing.
+with the left button to look around, tap to break. And if your machine has
+**no WebGL at all**, the game doesn't apologize — it switches to its own
+**CPU raycaster** (one DDA ray per pixel on a 2D canvas, adaptive
+resolution) and keeps playing:
+
+![The same bay rendered by the CPU raycaster: chunky pixels, clouds, an island with a tree](docs/screenshot-cpu.png)
+
+_Same world, same physics, same controls — zero GPU. This mode exists
+because a real player hit exactly that; their machine now runs the game at
+30-40 fps in pure JavaScript._
 
 ## What's inside
 
@@ -75,6 +82,11 @@ flowchart LR
 - **Edits survive.** Broken and placed blocks are stored as a sparse
   overlay in `localStorage`, keyed by seed, and re-applied over freshly
   generated chunks — an explored world costs kilobytes, not megabytes.
+- **Two renderers, one game.** The WebGL path draws meshed chunks with
+  baked AO; the CPU path marches one ray per pixel straight through the
+  block data (no meshes at all) with the same face shading, fog, water
+  tint, clouds and day/night palette. Everything else — world, streaming,
+  physics, interaction — is shared and renderer-blind.
 
 ## Development
 
@@ -99,12 +111,13 @@ spawned on solid ground, engages pointer lock, places a block on a
 neighboring column it picks by inspecting the world, breaks the block
 underfoot, walks — then opens a second page with `requestPointerLock`
 sabotaged to prove the drag-look fallback engages and stays fully playable
-(move, look, tap-break), and checks the console stayed clean — 14
-end-to-end checks with screenshots. It exists because unit tests can't
-see: the one real rendering bug this project shipped (an atlas UV/`flipY`
-mismatch that made grass sample an empty atlas region and leaves sample
-sand) was invisible to every unit test and obvious in the harness's first
-screenshot.
+(move, look, tap-break), a third page with `getContext('webgl')` sabotaged
+to prove the CPU raycaster boots, renders real terrain, moves and breaks —
+and checks the console stayed clean. 18 end-to-end checks with
+screenshots. It exists because unit tests can't see: the one real
+rendering bug this project shipped (an atlas UV/`flipY` mismatch that made
+grass sample an empty atlas region and leaves sample sand) was invisible
+to every unit test and obvious in the harness's first screenshot.
 
 ```sh
 npm run build && npx vite preview --port 4173 &
@@ -136,6 +149,9 @@ node scripts/screenshot.mjs                   # regenerates docs/screenshot.png
 - No lighting propagation (torches, sunlight flood fill) — AO plus
   directional shading only. It's the single feature that would most change
   the look of caves, and the natural next step.
+- The CPU renderer trades fidelity for universality: flat block colors
+  with a per-voxel speckle instead of textures, no ambient occlusion, no
+  block-outline highlight, ~50 blocks of view distance.
 - Water supports swimming (buoyancy, swim up, hop onto the shore) but
   doesn't flow — breaking a dam doesn't flood anything.
 - No mobs, crafting, or inventory beyond the hotbar — the scope is the

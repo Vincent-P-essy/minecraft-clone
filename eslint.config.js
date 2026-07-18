@@ -37,6 +37,7 @@ export default defineConfig(
         window: "readonly",
         document: "readonly",
         Element: "readonly",
+        HTMLCanvasElement: "readonly",
         MouseEvent: "readonly",
         Image: "readonly",
       },

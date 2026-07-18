@@ -2,6 +2,7 @@ import "./style.css";
 import * as THREE from "three";
 import { ChunkMeshManager, createChunkMaterial } from "./render/chunk-mesh-manager";
 import { Clouds } from "./render/clouds";
+import { CpuRenderer } from "./render/cpu-renderer";
 import { createGameScene } from "./render/scene";
 import { DAY_LENGTH_SECONDS, STARTUP_PHASE, skyStateAt } from "./render/sky";
 import { createTextureAtlas } from "./render/texture-atlas";
@@ -20,7 +21,8 @@ import {
 import { World } from "./world/world";
 
 const DEFAULT_SEED = 2026;
-const STREAM_RADIUS_CHUNKS = 7;
+const STREAM_RADIUS_WEBGL = 7;
+const STREAM_RADIUS_CPU = 4; // rays reach ~52 blocks; a tighter ring is plenty
 const WARMUP_RADIUS_CHUNKS = 2;
 const MESH_BUDGET_PER_FRAME = 3;
 
@@ -34,6 +36,7 @@ declare global {
       target: () => { x: number; y: number; z: number } | null;
       pitch: () => number;
       mode: () => string;
+      renderer: () => "webgl" | "cpu";
       loadedChunks: () => number;
       meshedChunks: () => number;
       pendingChunks: () => number;
@@ -43,8 +46,8 @@ declare global {
 }
 
 /** A dead "Click to play" button is the worst failure mode a browser game
- * can have. If anything at all goes wrong during boot — WebGL unavailable,
- * a worker that won't start, storage blocked — say so, visibly, in the
+ * can have. If anything at all goes wrong during boot — and the WebGL and
+ * worker paths already have their own fallbacks — say so, visibly, in the
  * overlay the player is already looking at. */
 function showFatalError(error: unknown): void {
   const content = document.querySelector("#overlay-content");
@@ -57,10 +60,20 @@ function showFatalError(error: unknown): void {
   detail.textContent = message;
   const hint = document.createElement("p");
   hint.textContent =
-    "Usually this means WebGL is unavailable. Try a hard refresh (Ctrl+Shift+R), " +
-    "another browser (Chrome/Firefox), or enabling hardware acceleration in your " +
-    "browser's settings.";
+    "Try a hard refresh (Ctrl+Shift+R) or another browser (Chrome/Firefox). " +
+    "If it keeps happening, please open an issue with this exact message.";
   content.append(title, detail, hint);
+}
+
+/** What the game loop needs from a renderer — satisfied by the Three.js
+ * scene when WebGL exists, and by the CPU raycaster when it doesn't. */
+interface GameView {
+  readonly kind: "webgl" | "cpu";
+  readonly camera: THREE.PerspectiveCamera;
+  readonly domElement: HTMLElement;
+  render(elapsedSeconds: number): void;
+  resize(width: number, height: number): void;
+  applySky(state: ReturnType<typeof skyStateAt>): void;
 }
 
 function boot(): void {
@@ -75,17 +88,59 @@ function boot(): void {
   const SEED = Number.isFinite(parsedSeed) ? parsedSeed : DEFAULT_SEED;
 
   const world = new World(SEED);
-  const { scene, camera, renderer, render, resize, applySky } = createGameScene(app);
   const atlas = createTextureAtlas(SEED);
-  const material = createChunkMaterial(atlas.texture);
-  const chunkMeshes = new ChunkMeshManager(scene, world, material);
-  const editStore = new EditStore(window.localStorage, SEED);
 
+  // The renderer: WebGL when the browser can, an in-house CPU raycaster
+  // when it can't. Same world, same physics, same controls either way.
+  let view: GameView;
+  let chunkMeshes: ChunkMeshManager | null = null;
+  let clouds: Clouds | null = null;
+  let highlight: THREE.LineSegments | null = null;
+  try {
+    const gameScene = createGameScene(app);
+    view = {
+      kind: "webgl",
+      camera: gameScene.camera,
+      domElement: gameScene.renderer.domElement,
+      render: () => {
+        gameScene.render();
+      },
+      resize: gameScene.resize,
+      applySky: gameScene.applySky,
+    };
+    chunkMeshes = new ChunkMeshManager(gameScene.scene, world, createChunkMaterial(atlas.texture));
+    clouds = new Clouds(gameScene.scene, SEED);
+    highlight = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),
+      new THREE.LineBasicMaterial({ color: 0x000000 }),
+    );
+    highlight.visible = false;
+    gameScene.scene.add(highlight);
+  } catch (webglError) {
+    console.warn("WebGL unavailable, switching to the CPU raycaster:", webglError);
+    const cpu = new CpuRenderer(app, world, SEED);
+    view = {
+      kind: "cpu",
+      camera: cpu.camera,
+      domElement: cpu.domElement,
+      render: (elapsed) => {
+        cpu.render(elapsed);
+      },
+      resize: (w, h) => {
+        cpu.resize(w, h);
+      },
+      applySky: (state) => {
+        cpu.applySky(state);
+      },
+    };
+  }
+
+  const editStore = new EditStore(window.localStorage, SEED);
   const streamer = new ChunkStreamer(world, {
-    radius: STREAM_RADIUS_CHUNKS,
+    radius: view.kind === "webgl" ? STREAM_RADIUS_WEBGL : STREAM_RADIUS_CPU,
     editStore,
     onUnload: (cx, cz) => {
-      chunkMeshes.removeChunkMesh(cx, cz);
+      chunkMeshes?.removeChunkMesh(cx, cz);
     },
   });
   const receive = (cx: number, cz: number, buffer: Uint8Array): void => {
@@ -106,13 +161,13 @@ function boot(): void {
   // Ground under the player's feet before the first frame; the rest streams in.
   streamer.warmUp(spawn.x, spawn.z, WARMUP_RADIUS_CHUNKS);
 
-  const player = new PlayerController(camera, renderer.domElement, world, spawn.x, spawn.z);
+  const player = new PlayerController(view.camera, view.domElement, world, spawn.x, spawn.z);
   const hotbar = new Hotbar(hotbarContainer, atlas.canvas);
   const interaction = new BlockInteraction(
-    camera,
-    renderer.domElement,
+    view.camera,
+    view.domElement,
     world,
-    chunkMeshes,
+    chunkMeshes ?? { updateChunk: () => undefined },
     hotbar,
     player,
   );
@@ -120,18 +175,10 @@ function boot(): void {
     editStore.record(x, y, z, id);
   };
 
-  const clouds = new Clouds(scene, SEED);
   const hud = new Hud(app);
 
-  const highlight = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),
-    new THREE.LineBasicMaterial({ color: 0x000000 }),
-  );
-  highlight.visible = false;
-  scene.add(highlight);
-
   window.addEventListener("resize", () => {
-    resize(window.innerWidth, window.innerHeight);
+    view.resize(window.innerWidth, window.innerHeight);
   });
 
   window.__mc = {
@@ -143,15 +190,16 @@ function boot(): void {
     },
     pitch: () => player.eyePitch,
     mode: () => player.mode,
+    renderer: () => view.kind,
     loadedChunks: () => world.loadedChunkCount,
-    meshedChunks: () => chunkMeshes.meshedChunkCount,
+    meshedChunks: () => chunkMeshes?.meshedChunkCount ?? world.loadedChunkCount,
     pendingChunks: () => streamer.pendingCount,
     seed: SEED,
   };
 
   const startedAt = performance.now();
   let lastTime = startedAt;
-  renderer.setAnimationLoop((time: number) => {
+  const frame = (time: number): void => {
     const dt = Math.min((time - lastTime) / 1000, 0.1); // clamp to avoid a huge step after a tab switch
     lastTime = time;
     const elapsed = (time - startedAt) / 1000 + STARTUP_PHASE * DAY_LENGTH_SECONDS;
@@ -160,16 +208,18 @@ function boot(): void {
     player.update(dt);
 
     for (const { cx, cz } of streamer.drainDirty(MESH_BUDGET_PER_FRAME)) {
-      chunkMeshes.updateChunk(cx, cz);
+      chunkMeshes?.updateChunk(cx, cz);
     }
 
-    applySky(skyStateAt(elapsed));
-    clouds.update(player.position.x, player.position.z, elapsed);
+    view.applySky(skyStateAt(elapsed));
+    clouds?.update(player.position.x, player.position.z, elapsed);
 
-    const hit = interaction.raycastFromCamera();
-    highlight.visible = hit !== null;
-    if (hit) {
-      highlight.position.set(hit.blockX + 0.5, hit.blockY + 0.5, hit.blockZ + 0.5);
+    if (highlight) {
+      const hit = interaction.raycastFromCamera();
+      highlight.visible = hit !== null;
+      if (hit) {
+        highlight.position.set(hit.blockX + 0.5, hit.blockY + 0.5, hit.blockZ + 0.5);
+      }
     }
 
     hud.frame(time, {
@@ -178,10 +228,13 @@ function boot(): void {
       z: player.position.z,
       chunks: world.loadedChunkCount,
       seed: SEED,
+      ...(view.kind === "cpu" ? { note: "cpu renderer" } : {}),
     });
 
-    render();
-  });
+    view.render(elapsed);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 try {

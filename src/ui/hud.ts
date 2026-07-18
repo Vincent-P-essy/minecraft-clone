@@ -6,6 +6,8 @@ export interface HudInfo {
   readonly z: number;
   readonly chunks: number;
   readonly seed: number;
+  /** Extra trailing detail, e.g. "cpu renderer" when WebGL is unavailable. */
+  readonly note?: string;
 }
 
 /** The little monospace status line: fps, position, chunk count, seed. */
@@ -27,6 +29,7 @@ export class Hud {
     this.frames = 0;
     this.lastReport = nowMs;
     const pos = `${Math.floor(info.x).toString()}, ${Math.floor(info.y).toString()}, ${Math.floor(info.z).toString()}`;
-    this.el.textContent = `${fps.toString()} fps · (${pos}) · ${info.chunks.toString()} chunks · seed ${info.seed.toString()}`;
+    const note = info.note ? ` · ${info.note}` : "";
+    this.el.textContent = `${fps.toString()} fps · (${pos}) · ${info.chunks.toString()} chunks · seed ${info.seed.toString()}${note}`;
   }
 }

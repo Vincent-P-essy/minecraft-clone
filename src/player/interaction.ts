@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { ChunkMeshManager } from "../render/chunk-mesh-manager";
 import { BLOCKS, BlockId, isSolid } from "../world/blocks";
 import { affectedChunkCoords } from "../world/coords";
 import type { World } from "../world/world";
@@ -11,6 +10,13 @@ import { raycastVoxels } from "./raycast";
 const REACH = 6;
 /** Hold-to-repeat cadence for breaking/placing while the button stays down. */
 const REPEAT_MS = 260;
+
+/** The one thing interaction needs from the render side: "this chunk's
+ * visuals are stale". The WebGL mesh manager implements it; the CPU
+ * raycaster needs nothing (it reads blocks directly every frame). */
+export interface ChunkVisualUpdater {
+  updateChunk(cx: number, cz: number): void;
+}
 /** A press this short and still counts as a tap (drag-look mode: left-drag
  * looks around, a left tap breaks). */
 const TAP_MS = 300;
@@ -25,7 +31,7 @@ const TAP_MAX_MOVE = 6;
 export class BlockInteraction {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly world: World;
-  private readonly chunkMeshes: ChunkMeshManager;
+  private readonly chunkMeshes: ChunkVisualUpdater;
   private readonly hotbar: Hotbar;
   private readonly controller: PlayerController;
   private repeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -37,7 +43,7 @@ export class BlockInteraction {
     camera: THREE.PerspectiveCamera,
     domElement: HTMLElement,
     world: World,
-    chunkMeshes: ChunkMeshManager,
+    chunkMeshes: ChunkVisualUpdater,
     hotbar: Hotbar,
     controller: PlayerController,
   ) {

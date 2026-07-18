@@ -290,6 +290,93 @@ try {
   }
   await fallbackPage.close();
 
+  // ---- zero-WebGL fallback (a fresh page, getContext('webgl*') sabotaged) ----
+  // Simulates machines where WebGL is unavailable entirely — a real player
+  // hit exactly this. The game must boot into the CPU raycaster and be
+  // fully playable: render, move, break.
+  const cpuPage = await browser.newPage();
+  await cpuPage.setViewport({ width: 1280, height: 720 });
+  await cpuPage.evaluateOnNewDocument(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function patched(type, ...rest) {
+      if (String(type).startsWith("webgl")) return null;
+      return original.call(this, type, ...rest);
+    };
+  });
+  await cpuPage.goto(URL_UNDER_TEST, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await cpuPage.waitForFunction(() => window.__mc && window.__mc.loadedChunks() >= 25, {
+    timeout: 120_000,
+    polling: 500,
+  });
+  const cpuMode = await cpuPage.evaluate(() => window.__mc.renderer());
+  report("no WebGL at all -> CPU raycaster engages", cpuMode === "cpu", `renderer=${cpuMode}`);
+
+  if (cpuMode === "cpu") {
+    await new Promise((r) => setTimeout(r, 1500)); // a few frames of rendering
+    await cpuPage.evaluate(() => document.querySelector("#overlay")?.classList.add("hidden"));
+    await new Promise((r) => setTimeout(r, 800));
+    await cpuPage.screenshot({ path: path.join(OUT_DIR, "05-cpu-renderer.png") });
+    await cpuPage.evaluate(() => document.querySelector("#overlay")?.classList.remove("hidden"));
+
+    // The CPU render must show real variety, same bar as the WebGL check.
+    const cpuShot = await cpuPage.screenshot({ encoding: "base64" });
+    const cpuPixels = await cpuPage.evaluate(async (b64) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const probe = document.createElement("canvas");
+      probe.width = img.width;
+      probe.height = img.height;
+      const ctx = probe.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, probe.width, probe.height);
+      const colors = new Set();
+      for (let i = 0; i < data.length; i += 4 * 97) {
+        colors.add(`${data[i] >> 4},${data[i + 1] >> 4},${data[i + 2] >> 4}`);
+      }
+      return { distinctColors: colors.size };
+    }, cpuShot);
+    report(
+      "CPU render shows real variety (terrain, not a blank frame)",
+      cpuPixels.distinctColors > 12,
+      `${cpuPixels.distinctColors} distinct quantized colors sampled`,
+    );
+
+    await cpuPage.click("#play-button");
+    await new Promise((r) => setTimeout(r, 1000));
+    const cpuBefore = await cpuPage.evaluate(() => window.__mc.position());
+    await cpuPage.keyboard.down("KeyW");
+    await new Promise((r) => setTimeout(r, 2000));
+    await cpuPage.keyboard.up("KeyW");
+    const cpuAfter = await cpuPage.evaluate(() => window.__mc.position());
+    const cpuDist = Math.hypot(cpuAfter.x - cpuBefore.x, cpuAfter.z - cpuBefore.z);
+    report("movement works on the CPU renderer", cpuDist > 1, `moved ${cpuDist.toFixed(1)} blocks`);
+
+    await cpuPage.evaluate(() => {
+      document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: 2000 }));
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    const cpuTarget = await cpuPage.evaluate(() => window.__mc.target());
+    if (cpuTarget) {
+      await cpuPage.mouse.down({ button: "left" });
+      await cpuPage.mouse.up({ button: "left" });
+      await new Promise((r) => setTimeout(r, 500));
+      const afterCpuBreak = await cpuPage.evaluate(
+        (t) => window.__mc.blockAt(t.x, t.y, t.z),
+        cpuTarget,
+      );
+      report(
+        "breaking works on the CPU renderer",
+        afterCpuBreak === 0,
+        `block is now id ${afterCpuBreak}`,
+      );
+    } else {
+      report("breaking works on the CPU renderer", false, "no target under crosshair");
+    }
+    await cpuPage.screenshot({ path: path.join(OUT_DIR, "06-cpu-playing.png") });
+  }
+  await cpuPage.close();
+
   // ---- console stayed clean ----
   const realErrors = consoleErrors.filter((e) => !e.includes("favicon"));
   report("no console errors", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));
