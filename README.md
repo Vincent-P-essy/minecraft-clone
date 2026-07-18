@@ -1,0 +1,114 @@
+# minecraft-clone
+
+> An infinite voxel world in your browser tab. No install, no assets, no
+> server — every block, texture, and cloud is computed from one seed.
+
+[![CI](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/pages.yml/badge.svg)](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/pages.yml)
+[![TypeScript strict](https://img.shields.io/badge/typescript-strict-blue)](tsconfig.app.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+**▶ Play it now: [vincent-p-essy.github.io/minecraft-clone](https://vincent-p-essy.github.io/minecraft-clone/)**
+
+A Minecraft-inspired voxel game built from scratch with Three.js and
+TypeScript: procedurally generated infinite terrain with forests, deserts,
+snowy peaks and cave systems, a full day/night cycle, and free block
+building — with your edits persisted across reloads.
+
+|                       |                                       |
+| --------------------- | ------------------------------------- |
+| Move / jump / sprint  | `WASD` · `Space` · `Shift`            |
+| Look                  | mouse (pointer lock — click to start) |
+| Break / place a block | left click / right click              |
+| Pick a block          | `1`-`9` or scroll wheel               |
+| Share your world      | add `?seed=<number>` to the URL       |
+
+## What's inside
+
+```mermaid
+flowchart LR
+    S[("seed")] --> T["terrain.ts<br/>fBm heightmap · biomes<br/>3D-noise caves · trees"]
+    T --> W["Web Worker<br/>chunk generation"]
+    W -->|transferable buffers| ST["streamer.ts<br/>load/unload around player"]
+    E[("localStorage<br/>edit overlay")] --> ST
+    ST --> M["mesher.ts<br/>face culling · per-vertex AO"]
+    M --> R["Three.js scene<br/>day/night sky · clouds"]
+    P["player<br/>swept AABB physics<br/>DDA voxel raycast"] --> ST
+    P --> R
+```
+
+- **Terrain is a pure function of (seed, world position).** Height, biome,
+  cave carving, and even tree placement are all recomputable by any chunk
+  independently — a canopy that leans across a chunk border gets identical
+  blocks stamped from both sides without any chunk-to-chunk communication.
+  That one design decision is what makes the world seamless _and_ the
+  generator trivially parallelizable.
+- **Generation runs in a Web Worker.** Block buffers come back as
+  transferables (zero copy); the main thread only meshes, on a fixed
+  per-frame budget, so walking into new terrain doesn't hitch.
+- **The mesher bakes real ambient occlusion.** Per-vertex, the classic
+  "0fps" formulation, with each quad's diagonal flipped toward the brighter
+  vertex pair to kill the anisotropic dark-streak artifact. Combined with
+  directional face shading, it's what makes a world with one light source
+  read as _lit_ instead of flat.
+- **Zero art assets.** The entire texture atlas (grass, sand, wood rings,
+  bark, water...) is drawn onto a small canvas at startup with a seeded
+  PRNG. The hotbar icons are cropped from the same canvas.
+- **Physics never touches the renderer.** Movement is a pure per-axis swept
+  AABB resolver over a `(x, y, z) => solid?` closure; block targeting is an
+  Amanatides-Woo DDA raycast that visits every voxel boundary (a thin wall
+  can't be skipped the way fixed-step sampling would). Both are unit-tested
+  against synthetic terrain with no DOM or WebGL anywhere in sight.
+- **Edits survive.** Broken and placed blocks are stored as a sparse
+  overlay in `localStorage`, keyed by seed, and re-applied over freshly
+  generated chunks — an explored world costs kilobytes, not megabytes.
+
+## Development
+
+```sh
+npm ci
+npm run dev          # local dev server
+npm run test         # 195 offline tests (world, mesher, physics, raycast, streaming, sky)
+npm run lint && npm run typecheck
+npm run build        # production bundle
+```
+
+Everything interesting is testable without a browser: terrain determinism
+and seam consistency, cave/ocean-floor invariants, mesher face counts and
+AO levels and triangle winding, collision resolution, raycast face
+detection, streaming load/unload/persistence round trips, day/night
+continuity. CI runs the full gate on every push.
+
+## Design decisions
+
+- **Chunk-independent generation over chunk-to-chunk communication.** The
+  usual alternative — generate a chunk, then patch neighbors when a tree
+  overhangs — needs ordering, patch queues, and produces seams when it's
+  wrong. Making every feature a pure function of world position deletes
+  the whole problem class, at the cost of some redundant computation at
+  borders (cheap, and it runs in a worker anyway).
+- **Meshing on the main thread, generation off it.** Meshing needs
+  neighbor-chunk reads and produces GPU-bound buffers; shipping all that
+  state to a worker costs more than the ~1-2ms a chunk mesh takes. The
+  expensive, state-free part (noise sampling) is what moves.
+- **Reject-by-default physics steps.** The collision resolver assumes
+  small per-frame displacements and clamps them axis-by-axis; velocities
+  zero out on contact. Terminal velocity plus the per-axis sweep keeps
+  even long falls from tunneling through a floor.
+- **`localStorage` over a save-file format.** The overlay-over-regeneration
+  model means persistence is a dictionary, not a world serializer.
+
+## Limits
+
+- No lighting propagation (torches, sunlight flood fill) — AO plus
+  directional shading only. It's the single feature that would most change
+  the look of caves, and the natural next step.
+- Water is visual, not simulated: no flow, no swimming physics.
+- No mobs, crafting, or inventory beyond the hotbar — the scope is the
+  world itself: generate, explore, dig, build.
+- Chunk meshes rebuild whole-chunk on edit (~1-2ms); fine in practice,
+  greedy meshing would shrink both that and draw calls further.
+
+## License
+
+[MIT](LICENSE) — © Vincent Plessy
