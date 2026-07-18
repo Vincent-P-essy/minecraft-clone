@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A Minecraft-inspired voxel world in the browser: infinite procedural terrain, break and place blocks, no install."
+    />
+    <title>minecraft-clone</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="crosshair" aria-hidden="true"></div>
+      <div id="hotbar"></div>
+      <div id="overlay">
+        <div id="overlay-content">
+          <h1>minecraft-clone</h1>
+          <p>WASD to move &middot; mouse to look &middot; space to jump</p>
+          <p>left click breaks a block &middot; right click places one</p>
+          <p>1-9 or scroll to pick a block</p>
+          <button id="play-button" type="button">Click to play</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
