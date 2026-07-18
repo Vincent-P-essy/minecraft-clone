@@ -112,20 +112,78 @@ try {
   const locked = await page.evaluate(() => document.pointerLockElement !== null);
   report("pointer lock engages from the play button", locked);
 
+  // Sets an absolute view direction regardless of prior state: pitch first
+  // clamps fully up, then a fixed downward delta lands at a known angle;
+  // yaw is a pure delta (the harness starts at yaw 0 and tracks its own
+  // rotations). Synthetic MouseEvents because headless pointer-lock delta
+  // reporting through CDP-dispatched moves is unreliable.
+  const look = async (p, yawPixels, pitchPixels) => {
+    await p.evaluate(
+      ([yawPx, pitchPx]) => {
+        document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: -2000 }));
+        document.dispatchEvent(
+          new MouseEvent("mousemove", { movementX: yawPx, movementY: pitchPx }),
+        );
+      },
+      [yawPixels, pitchPixels],
+    );
+    await new Promise((r) => setTimeout(r, 600));
+  };
+
   if (locked) {
-    // Break/place first, from the spawn point, where the ground is
-    // guaranteed to be right under the player's feet and within reach —
-    // after walking, the player may be mid-fall down a slope with nothing
-    // targetable for 6 blocks. Look down via a synthetic MouseEvent with an
-    // explicit movementY (headless pointer-lock delta reporting through
-    // CDP-dispatched moves is unreliable).
-    // 700 clamps to max pitch: looking (almost) straight down guarantees a
-    // target — the block under the player's own feet — even on a spawn peak
-    // whose slopes fall away faster than the 6-block reach.
-    await page.evaluate(() => {
-      document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: 700 }));
+    // ---- placing, against a flat neighboring column the test picks itself ----
+    // Aiming at the top face of an adjacent column's surface block makes the
+    // place cell sit outside the player's own body (placing into yourself is
+    // correctly rejected). The neighbor is chosen by inspecting the world,
+    // so the test doesn't depend on which way the terrain slopes.
+    const neighbor = await page.evaluate(() => {
+      const p = window.__mc.position();
+      const bx = Math.floor(p.x);
+      const by = Math.floor(p.y);
+      const bz = Math.floor(p.z);
+      const candidates = [
+        { dx: 1, dz: 0, yaw: -Math.PI / 2 }, // +X
+        { dx: -1, dz: 0, yaw: Math.PI / 2 }, // -X
+        { dx: 0, dz: -1, yaw: 0 }, // -Z (default facing)
+        { dx: 0, dz: 1, yaw: Math.PI }, // +Z
+      ];
+      for (const c of candidates) {
+        const surface = window.__mc.blockAt(bx + c.dx, by - 1, bz + c.dz);
+        const above = window.__mc.blockAt(bx + c.dx, by, bz + c.dz);
+        if (surface !== 0 && surface !== 5 && above === 0) {
+          return { ...c, x: bx + c.dx, y: by - 1, z: bz + c.dz };
+        }
+      }
+      return null;
     });
-    await new Promise((r) => setTimeout(r, 700));
+    report(
+      "a flat neighboring column exists to place against",
+      neighbor !== null,
+      JSON.stringify(neighbor),
+    );
+
+    if (neighbor) {
+      // Face the neighbor, look ~55 degrees down: the ray crosses into its
+      // column below the player's eye and hits the surface block's top face.
+      await look(page, -neighbor.yaw / 0.0022, 1146);
+      const placeTarget = await page.evaluate(() => window.__mc.target());
+      const aimedRight =
+        placeTarget !== null && placeTarget.x === neighbor.x && placeTarget.z === neighbor.z;
+      await page.mouse.down({ button: "right" });
+      await page.mouse.up({ button: "right" });
+      await new Promise((r) => setTimeout(r, 700));
+      const placed = await page.evaluate((n) => window.__mc.blockAt(n.x, n.y + 1, n.z), neighbor);
+      report(
+        "right click places the selected block on the neighbor's top face",
+        placed === 1, // grass, the default hotbar selection
+        `aimed ${JSON.stringify(placeTarget)} (expected column ${String(neighbor.x)},${String(neighbor.z)}: ${String(aimedRight)}), cell above is now id ${placed}`,
+      );
+      // Undo the yaw so later steps face -Z again.
+      await look(page, neighbor.yaw / 0.0022, 709);
+    }
+
+    // ---- breaking, straight down at the block under the player's feet ----
+    await look(page, 0, 2000); // clamps to max pitch: straight down
     const target = await page.evaluate(() => window.__mc.target());
     report("crosshair targets a block when looking down", target !== null, JSON.stringify(target));
 
@@ -139,41 +197,10 @@ try {
         afterBreak === 0,
         `block ${JSON.stringify(target)} is now id ${afterBreak}`,
       );
-
-      const placeTarget = await page.evaluate(() => window.__mc.target());
-      if (placeTarget) {
-        const placeCell = await page.evaluate(() => {
-          const hit = window.__mc.target();
-          return hit; // the solid block aimed at; the placed block lands on its hit face
-        });
-        await page.mouse.down({ button: "right" });
-        await page.mouse.up({ button: "right" });
-        await new Promise((r) => setTimeout(r, 700));
-        // Placement is validated by the world state changing somewhere
-        // adjacent to the aim cell: scan its 6 neighbors for the block id
-        // selected in the hotbar (slot 1 = grass by default).
-        const placedNearby = await page.evaluate((t) => {
-          const offsets = [
-            [1, 0, 0],
-            [-1, 0, 0],
-            [0, 1, 0],
-            [0, -1, 0],
-            [0, 0, 1],
-            [0, 0, -1],
-          ];
-          return offsets.some(([dx, dy, dz]) => {
-            const id = window.__mc.blockAt(t.x + dx, t.y + dy, t.z + dz);
-            return id === 1; // grass, the default hotbar selection
-          });
-        }, placeCell);
-        report("right click places the selected block against the hit face", placedNearby);
-      }
     }
 
-    // Look back up before the movement test.
-    await page.evaluate(() => {
-      document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: -700 }));
-    });
+    // Level the view before the movement test.
+    await look(page, 0, 709);
 
     const before = await page.evaluate(() => window.__mc.position());
     await page.keyboard.down("KeyW");
@@ -189,6 +216,79 @@ try {
 
     await page.screenshot({ path: path.join(OUT_DIR, "03-playing.png") });
   }
+
+  // ---- pointer-lock-blocked fallback (a fresh page, lock sabotaged) ----
+  // Simulates browsers/extensions that silently refuse pointer lock — the
+  // exact "I click play and nothing happens" failure. The game must fall
+  // back to drag-look and still be fully playable.
+  const fallbackPage = await browser.newPage();
+  await fallbackPage.setViewport({ width: 1280, height: 720 });
+  await fallbackPage.evaluateOnNewDocument(() => {
+    Element.prototype.requestPointerLock = () => Promise.reject(new Error("blocked by test"));
+  });
+  await fallbackPage.goto(URL_UNDER_TEST, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await fallbackPage.waitForFunction(() => window.__mc && window.__mc.meshedChunks() >= 25, {
+    timeout: 120_000,
+    polling: 500,
+  });
+  await fallbackPage.click("#play-button");
+  await new Promise((r) => setTimeout(r, 1200)); // watchdog is 600ms
+  const fallback = await fallbackPage.evaluate(() => ({
+    mode: window.__mc.mode(),
+    overlayHidden: document.querySelector("#overlay")?.classList.contains("hidden") ?? false,
+  }));
+  report(
+    "pointer lock blocked -> drag-look fallback engages",
+    fallback.mode === "drag" && fallback.overlayHidden,
+    `mode=${fallback.mode}, overlay hidden=${String(fallback.overlayHidden)}`,
+  );
+
+  if (fallback.mode === "drag") {
+    const before = await fallbackPage.evaluate(() => window.__mc.position());
+    await fallbackPage.keyboard.down("KeyW");
+    await new Promise((r) => setTimeout(r, 2000));
+    await fallbackPage.keyboard.up("KeyW");
+    const after = await fallbackPage.evaluate(() => window.__mc.position());
+    const dist = Math.hypot(after.x - before.x, after.z - before.z);
+    report("movement works in drag-look mode", dist > 1, `moved ${dist.toFixed(1)} blocks`);
+
+    // Drag with the left button must rotate the camera.
+    const pitchBefore = await fallbackPage.evaluate(() => window.__mc.pitch());
+    await fallbackPage.mouse.move(640, 360);
+    await fallbackPage.mouse.down({ button: "left" });
+    await fallbackPage.mouse.move(640, 500, { steps: 5 });
+    await fallbackPage.mouse.up({ button: "left" });
+    await new Promise((r) => setTimeout(r, 400));
+    const pitchAfter = await fallbackPage.evaluate(() => window.__mc.pitch());
+    report(
+      "left-drag looks around in fallback mode",
+      Math.abs(pitchAfter - pitchBefore) > 0.05,
+      `pitch ${pitchBefore.toFixed(2)} -> ${pitchAfter.toFixed(2)}`,
+    );
+
+    // A quick tap (no drag) must break the block under the crosshair.
+    // Steepen the view with a real drag first (synthetic mousemoves are
+    // ignored in drag mode unless the button is down — by design).
+    await fallbackPage.mouse.move(640, 300);
+    await fallbackPage.mouse.down({ button: "left" });
+    await fallbackPage.mouse.move(640, 700, { steps: 8 });
+    await fallbackPage.mouse.up({ button: "left" });
+    await new Promise((r) => setTimeout(r, 400));
+    const tapTarget = await fallbackPage.evaluate(() => window.__mc.target());
+    if (tapTarget) {
+      await fallbackPage.mouse.move(640, 360);
+      await fallbackPage.mouse.down({ button: "left" });
+      await fallbackPage.mouse.up({ button: "left" });
+      await new Promise((r) => setTimeout(r, 500));
+      const afterTap = await fallbackPage.evaluate(
+        (t) => window.__mc.blockAt(t.x, t.y, t.z),
+        tapTarget,
+      );
+      report("tap breaks a block in fallback mode", afterTap === 0, `block is now id ${afterTap}`);
+    }
+    await fallbackPage.screenshot({ path: path.join(OUT_DIR, "04-fallback-mode.png") });
+  }
+  await fallbackPage.close();
 
   // ---- console stayed clean ----
   const realErrors = consoleErrors.filter((e) => !e.includes("favicon"));

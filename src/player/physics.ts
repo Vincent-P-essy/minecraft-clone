@@ -155,13 +155,36 @@ export interface MoveInput {
   readonly sprint?: boolean;
 }
 
-/** Advances the player's physics state by one frame: gravity, jump, input-
- * driven horizontal movement, and collision resolution against `isSolid`. */
+export const WATER_GRAVITY = 10;
+export const WATER_TERMINAL_VELOCITY = -4;
+export const SWIM_UP_SPEED = 4.5;
+/** Jump impulse when treading at the surface (feet in water, head out) —
+ * strong enough to hop onto a one-block-high shore. */
+export const SURFACE_HOP_SPEED = 8.5;
+export const WATER_MOVE_FACTOR = 0.65;
+
+/** Which fluid regime the player is in: `submerged` (head under), `surface`
+ * (feet in water, head out), or `none`. Water is queried at the body's
+ * center column, matching how it feels rather than the AABB's full extent. */
+export function waterRegime(position: Vec3, isWater: SolidQuery): "none" | "surface" | "submerged" {
+  const x = Math.floor(position.x);
+  const z = Math.floor(position.z);
+  const headY = Math.floor(position.y + PLAYER_EYE_HEIGHT);
+  const feetY = Math.floor(position.y + 0.4);
+  if (isWater(x, headY, z)) return "submerged";
+  if (isWater(x, feetY, z)) return "surface";
+  return "none";
+}
+
+/** Advances the player's physics state by one frame: gravity (or buoyancy in
+ * water), jump/swim, input-driven horizontal movement, and collision
+ * resolution against `isSolid`. */
 export function stepPhysics(
   state: PlayerPhysicsState,
   input: MoveInput,
   dt: number,
   isSolid: SolidQuery,
+  isWater: SolidQuery = () => false,
 ): PlayerPhysicsState {
   const fwd = forwardVector(input.yaw);
   const right = rightVector(input.yaw);
@@ -174,13 +197,24 @@ export function stepPhysics(
     iz /= inputLength;
   }
 
-  let vy = state.velocity.y - GRAVITY * dt;
-  vy = Math.max(vy, TERMINAL_VELOCITY);
-  if (input.jump && state.onGround) {
-    vy = JUMP_SPEED;
+  const regime = waterRegime(state.position, isWater);
+
+  let vy: number;
+  if (regime === "submerged") {
+    vy = Math.max(state.velocity.y - WATER_GRAVITY * dt, WATER_TERMINAL_VELOCITY);
+    if (input.jump) vy = SWIM_UP_SPEED;
+  } else if (regime === "surface") {
+    vy = Math.max(state.velocity.y - WATER_GRAVITY * dt, WATER_TERMINAL_VELOCITY);
+    if (input.jump) vy = SURFACE_HOP_SPEED;
+  } else {
+    vy = Math.max(state.velocity.y - GRAVITY * dt, TERMINAL_VELOCITY);
+    if (input.jump && state.onGround) vy = JUMP_SPEED;
   }
 
-  const speed = MOVE_SPEED * (input.sprint ? SPRINT_MULTIPLIER : 1);
+  const speed =
+    MOVE_SPEED *
+    (input.sprint ? SPRINT_MULTIPLIER : 1) *
+    (regime === "none" ? 1 : WATER_MOVE_FACTOR);
   const vx = ix * speed;
   const vz = iz * speed;
 

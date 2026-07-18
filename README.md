@@ -21,13 +21,20 @@ TypeScript: procedurally generated infinite terrain with forests, deserts,
 snowy peaks and cave systems, a full day/night cycle, and free block
 building — with your edits persisted across reloads.
 
-|                       |                                       |
-| --------------------- | ------------------------------------- |
-| Move / jump / sprint  | `WASD` · `Space` · `Shift`            |
-| Look                  | mouse (pointer lock — click to start) |
-| Break / place a block | left click / right click              |
-| Pick a block          | `1`-`9` or scroll wheel               |
-| Share your world      | add `?seed=<number>` to the URL       |
+|                       |                                           |
+| --------------------- | ----------------------------------------- |
+| Move / jump / sprint  | `WASD` · `Space` · `Shift`                |
+| Swim                  | `Space` in water (hop out at the surface) |
+| Look                  | mouse (pointer lock — click to start)     |
+| Break / place a block | left click (hold to repeat) / right click |
+| Pick a block          | `1`-`9` or scroll wheel                   |
+| Share your world      | add `?seed=<number>` to the URL           |
+
+If your browser refuses pointer lock (some extensions and embedded contexts
+block it silently), the game switches to **drag-to-look** on its own: drag
+with the left button to look around, tap to break. And if startup fails
+outright — no WebGL, usually — the menu says exactly what went wrong
+instead of leaving a button that does nothing.
 
 ## What's inside
 
@@ -74,7 +81,7 @@ flowchart LR
 ```sh
 npm ci
 npm run dev          # local dev server
-npm run test         # 195 offline tests (world, mesher, physics, raycast, streaming, sky)
+npm run test         # 204 offline tests (world, mesher, physics, raycast, streaming, sky)
 npm run lint && npm run typecheck
 npm run build        # production bundle
 ```
@@ -88,12 +95,16 @@ continuity. CI runs the full gate on every push.
 On top of that, `scripts/visual-check.mjs` boots the _built_ game in a
 headless Chromium (SwiftShader software WebGL — works on GPU-less machines
 and CI) and plays it: waits for the world to mesh, verifies the player
-spawned on solid ground, engages pointer lock, looks down, breaks a block,
-places one, walks, and checks the console stayed clean — 9 end-to-end
-checks with screenshots. It exists because unit tests can't see: the one
-real rendering bug this project shipped (an atlas UV/`flipY` mismatch that
-made grass sample an empty atlas region and leaves sample sand) was
-invisible to all 195 of them and obvious in the harness's first screenshot.
+spawned on solid ground, engages pointer lock, places a block on a
+neighboring column it picks by inspecting the world, breaks the block
+underfoot, walks — then opens a second page with `requestPointerLock`
+sabotaged to prove the drag-look fallback engages and stays fully playable
+(move, look, tap-break), and checks the console stayed clean — 14
+end-to-end checks with screenshots. It exists because unit tests can't
+see: the one real rendering bug this project shipped (an atlas UV/`flipY`
+mismatch that made grass sample an empty atlas region and leaves sample
+sand) was invisible to every unit test and obvious in the harness's first
+screenshot.
 
 ```sh
 npm run build && npx vite preview --port 4173 &
@@ -125,7 +136,8 @@ node scripts/screenshot.mjs                   # regenerates docs/screenshot.png
 - No lighting propagation (torches, sunlight flood fill) — AO plus
   directional shading only. It's the single feature that would most change
   the look of caves, and the natural next step.
-- Water is visual, not simulated: no flow, no swimming physics.
+- Water supports swimming (buoyancy, swim up, hop onto the shore) but
+  doesn't flow — breaking a dam doesn't flood anything.
 - No mobs, crafting, or inventory beyond the hotbar — the scope is the
   world itself: generate, explore, dig, build.
 - Chunk meshes rebuild whole-chunk on edit (~1-2ms); fine in practice,

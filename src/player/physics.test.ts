@@ -15,7 +15,12 @@ import {
   type SolidQuery,
   SPRINT_MULTIPLIER,
   stepPhysics,
+  SURFACE_HOP_SPEED,
+  SWIM_UP_SPEED,
   TERMINAL_VELOCITY,
+  WATER_MOVE_FACTOR,
+  WATER_TERMINAL_VELOCITY,
+  waterRegime,
 } from "./physics";
 
 /** Solid everywhere at or below `groundY`, air above — an infinite flat floor. */
@@ -271,6 +276,67 @@ describe("stepPhysics", () => {
     }
     expect(s.position.y).toBeCloseTo(5, 4);
     expect(s.onGround).toBe(true);
+  });
+});
+
+describe("water physics", () => {
+  const state = (overrides: Partial<PlayerPhysicsState> = {}): PlayerPhysicsState => ({
+    position: { x: 0.5, y: 10, z: 0.5 },
+    velocity: { x: 0, y: 0, z: 0 },
+    onGround: false,
+    ...overrides,
+  });
+  const noInput = { forward: 0, right: 0, jump: false, yaw: 0 };
+  /** Water fills everything below y=20 (deep pool, no floor in reach). */
+  const deepWater: SolidQuery = (_x, y) => y < 20;
+
+  it("classifies submerged / surface / dry correctly", () => {
+    expect(waterRegime({ x: 0.5, y: 10, z: 0.5 }, deepWater)).toBe("submerged");
+    // Feet in water at y=19, eye at 20.62 above the surface.
+    expect(waterRegime({ x: 0.5, y: 19, z: 0.5 }, deepWater)).toBe("surface");
+    expect(waterRegime({ x: 0.5, y: 30, z: 0.5 }, deepWater)).toBe("none");
+  });
+
+  it("sinks slowly underwater, capped at the water terminal velocity", () => {
+    let s = state({ velocity: { x: 0, y: -100, z: 0 } });
+    s = stepPhysics(s, noInput, 1 / 60, () => false, deepWater);
+    expect(s.velocity.y).toBeGreaterThanOrEqual(WATER_TERMINAL_VELOCITY);
+    expect(s.velocity.y).toBeGreaterThan(TERMINAL_VELOCITY);
+  });
+
+  it("space swims upward while submerged, no ground required", () => {
+    const s = stepPhysics(state(), { ...noInput, jump: true }, 1 / 60, () => false, deepWater);
+    expect(s.velocity.y).toBeCloseTo(SWIM_UP_SPEED);
+    expect(s.position.y).toBeGreaterThan(10);
+  });
+
+  it("space at the surface gives a stronger hop, enough to clear a shore block", () => {
+    const s = stepPhysics(
+      state({ position: { x: 0.5, y: 19, z: 0.5 } }),
+      { ...noInput, jump: true },
+      1 / 60,
+      () => false,
+      deepWater,
+    );
+    expect(s.velocity.y).toBeCloseTo(SURFACE_HOP_SPEED);
+    // Rough ballistic apex from the hop under full gravity: v^2 / 2g.
+    const apex = (SURFACE_HOP_SPEED * SURFACE_HOP_SPEED) / (2 * GRAVITY);
+    expect(apex).toBeGreaterThan(1.1); // clears one block with margin
+  });
+
+  it("moves slower horizontally through water than on land", () => {
+    const startZ = state().position.z;
+    const dry = stepPhysics(state(), { ...noInput, forward: 1 }, 1 / 60, () => false);
+    const wet = stepPhysics(state(), { ...noInput, forward: 1 }, 1 / 60, () => false, deepWater);
+    const dryMoved = Math.abs(dry.position.z - startZ);
+    const wetMoved = Math.abs(wet.position.z - startZ);
+    expect(wetMoved).toBeLessThan(dryMoved);
+    expect(wetMoved / dryMoved).toBeCloseTo(WATER_MOVE_FACTOR, 5);
+  });
+
+  it("dry-land physics is untouched when no water query is given", () => {
+    const s = stepPhysics(state(), { ...noInput, jump: true }, 1 / 60, () => false);
+    expect(s.velocity.y).toBeLessThan(0); // airborne jump does nothing, gravity applies
   });
 });
 

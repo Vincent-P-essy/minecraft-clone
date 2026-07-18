@@ -9,17 +9,27 @@ import type { PlayerController } from "./controller";
 import { raycastVoxels } from "./raycast";
 
 const REACH = 6;
+/** Hold-to-repeat cadence for breaking/placing while the button stays down. */
+const REPEAT_MS = 260;
+/** A press this short and still counts as a tap (drag-look mode: left-drag
+ * looks around, a left tap breaks). */
+const TAP_MS = 300;
+const TAP_MAX_MOVE = 6;
 
 /** Left click breaks the targeted block, right click places the hotbar's
  * selected block against the targeted face. Both are a raycast (reused
  * every frame for the highlight, see main.ts) plus a World edit plus a
- * remesh of every chunk the edit could visually affect. */
+ * remesh of every chunk the edit could visually affect. In pointer-lock
+ * mode holding a button repeats the action; in drag-look mode the left
+ * button doubles as the look control, so breaking is a quick tap. */
 export class BlockInteraction {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly world: World;
   private readonly chunkMeshes: ChunkMeshManager;
   private readonly hotbar: Hotbar;
   private readonly controller: PlayerController;
+  private repeatTimer: ReturnType<typeof setInterval> | undefined;
+  private tapStart: { time: number; x: number; y: number } | undefined;
   /** Fired after every successful world edit — persistence hooks in here. */
   onEdit: ((worldX: number, worldY: number, worldZ: number, id: BlockId) => void) | undefined;
 
@@ -38,10 +48,59 @@ export class BlockInteraction {
     this.controller = controller;
 
     domElement.addEventListener("mousedown", (e) => {
-      if (!this.controller.isLocked) return;
-      if (e.button === 0) this.breakTargetedBlock();
-      else if (e.button === 2) this.placeTargetedBlock();
+      if (!this.controller.isActive) return;
+
+      if (this.controller.isLocked) {
+        const action =
+          e.button === 0
+            ? () => {
+                this.breakTargetedBlock();
+              }
+            : e.button === 2
+              ? () => {
+                  this.placeTargetedBlock();
+                }
+              : undefined;
+        if (!action) return;
+        action();
+        this.stopRepeat();
+        this.repeatTimer = setInterval(action, REPEAT_MS);
+        return;
+      }
+
+      // Drag-look mode: left press might be a look-drag or a break-tap —
+      // decide on release. Right click places immediately.
+      if (e.button === 0) {
+        this.tapStart = { time: performance.now(), x: e.clientX, y: e.clientY };
+      } else if (e.button === 2) {
+        this.placeTargetedBlock();
+      }
     });
+
+    document.addEventListener("mouseup", (e) => {
+      this.stopRepeat();
+      if (!this.controller.isActive || this.controller.isLocked) return;
+      if (e.button === 0 && this.tapStart) {
+        const moved = Math.hypot(e.clientX - this.tapStart.x, e.clientY - this.tapStart.y);
+        const elapsed = performance.now() - this.tapStart.time;
+        if (moved <= TAP_MAX_MOVE && elapsed <= TAP_MS) this.breakTargetedBlock();
+        this.tapStart = undefined;
+      }
+    });
+
+    document.addEventListener("pointerlockchange", () => {
+      this.stopRepeat();
+    });
+    window.addEventListener("blur", () => {
+      this.stopRepeat();
+    });
+  }
+
+  private stopRepeat(): void {
+    if (this.repeatTimer !== undefined) {
+      clearInterval(this.repeatTimer);
+      this.repeatTimer = undefined;
+    }
   }
 
   raycastFromCamera(maxDistance = REACH) {
