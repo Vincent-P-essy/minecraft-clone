@@ -120,6 +120,12 @@ export function createTextureAtlas(seed = 1): BlockTextureAtlas {
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
+  // The mesher's tile UVs use canvas conventions (v grows downward from the
+  // top of the atlas). Three.js flips texture uploads by default, which
+  // would shift every tile row: grass would sample an empty atlas region
+  // (discarded by alphaTest — see-through terrain) and leaves would sample
+  // sand. Caught by scripts/visual-check.mjs, invisible to unit tests.
+  texture.flipY = false;
   texture.needsUpdate = true;
 
   return { texture, canvas };

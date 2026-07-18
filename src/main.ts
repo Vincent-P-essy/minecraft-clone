@@ -86,6 +86,36 @@ window.addEventListener("resize", () => {
   resize(window.innerWidth, window.innerHeight);
 });
 
+// Read-only debug handle for the visual-check harness (scripts/visual-check.mjs):
+// lets an automated browser assert on game state instead of guessing from pixels.
+declare global {
+  interface Window {
+    __mc?: {
+      position: () => { x: number; y: number; z: number };
+      blockAt: (x: number, y: number, z: number) => number;
+      target: () => { x: number; y: number; z: number } | null;
+      pitch: () => number;
+      loadedChunks: () => number;
+      meshedChunks: () => number;
+      pendingChunks: () => number;
+      seed: number;
+    };
+  }
+}
+window.__mc = {
+  position: () => ({ ...player.position }),
+  blockAt: (x, y, z) => world.getBlock(x, y, z),
+  target: () => {
+    const hit = interaction.raycastFromCamera();
+    return hit ? { x: hit.blockX, y: hit.blockY, z: hit.blockZ } : null;
+  },
+  pitch: () => player.eyePitch,
+  loadedChunks: () => world.loadedChunkCount,
+  meshedChunks: () => chunkMeshes.meshedChunkCount,
+  pendingChunks: () => streamer.pendingCount,
+  seed: SEED,
+};
+
 const startedAt = performance.now();
 let lastTime = startedAt;
 renderer.setAnimationLoop((time: number) => {

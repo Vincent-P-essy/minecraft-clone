@@ -25,3 +25,6 @@ dist-ssr
 
 # TypeScript incremental build state
 *.tsbuildinfo
+
+# Visual-check harness output
+visual-check/

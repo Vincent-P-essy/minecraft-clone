@@ -22,5 +22,24 @@ export default defineConfig(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
+  {
+    // Plain-JS browser-automation harnesses, outside the TS project graph.
+    // They run under Node but embed page.evaluate callbacks that execute in
+    // the browser, so both worlds' globals are in scope.
+    files: ["scripts/**/*.mjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+        URL: "readonly",
+        window: "readonly",
+        document: "readonly",
+        MouseEvent: "readonly",
+        Image: "readonly",
+      },
+    },
+  },
   prettier,
 );
