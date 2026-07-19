@@ -96,6 +96,7 @@ function boot(): void {
   let chunkMeshes: ChunkMeshManager | null = null;
   let clouds: Clouds | null = null;
   let highlight: THREE.LineSegments | null = null;
+  let cpuView: CpuRenderer | null = null;
   try {
     const gameScene = createGameScene(app);
     view = {
@@ -119,6 +120,7 @@ function boot(): void {
   } catch (webglError) {
     console.warn("WebGL unavailable, switching to the CPU raycaster:", webglError);
     const cpu = new CpuRenderer(app, world, SEED);
+    cpuView = cpu;
     view = {
       kind: "cpu",
       camera: cpu.camera,
@@ -214,13 +216,14 @@ function boot(): void {
     view.applySky(skyStateAt(elapsed));
     clouds?.update(player.position.x, player.position.z, elapsed);
 
+    const hit = interaction.raycastFromCamera();
     if (highlight) {
-      const hit = interaction.raycastFromCamera();
       highlight.visible = hit !== null;
       if (hit) {
         highlight.position.set(hit.blockX + 0.5, hit.blockY + 0.5, hit.blockZ + 0.5);
       }
     }
+    cpuView?.setHighlight(hit ? { x: hit.blockX, y: hit.blockY, z: hit.blockZ } : null);
 
     hud.frame(time, {
       x: player.position.x,

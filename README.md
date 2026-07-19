@@ -149,9 +149,10 @@ node scripts/screenshot.mjs                   # regenerates docs/screenshot.png
 - No lighting propagation (torches, sunlight flood fill) — AO plus
   directional shading only. It's the single feature that would most change
   the look of caves, and the natural next step.
-- The CPU renderer trades fidelity for universality: flat block colors
-  with a per-voxel speckle instead of textures, no ambient occlusion, no
-  block-outline highlight, ~50 blocks of view distance.
+- The CPU renderer trades some fidelity for universality: procedural
+  texels instead of the full atlas and ~50 blocks of view distance. It
+  still carries per-pixel ambient occlusion, sun-tracked face lighting, a
+  sun disc, night stars, soft clouds, and the block-outline highlight.
 - Water supports swimming (buoyancy, swim up, hop onto the shore) but
   doesn't flow — breaking a dam doesn't flood anything.
 - No mobs, crafting, or inventory beyond the hotbar — the scope is the

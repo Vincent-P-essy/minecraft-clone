@@ -7,11 +7,17 @@ import type { World } from "../world/world";
 import { BLOCK_COLORS } from "./block-colors";
 
 /** A complete software renderer for the voxel world: one DDA ray per pixel
- * on a low-resolution 2D canvas, upscaled with crisp pixels. It exists so
- * the game still runs — and still looks like itself — on machines where
- * WebGL is unavailable entirely (the reason this project has it: a real
- * player hit exactly that). Three.js is used only as camera math here;
- * nothing touches the GPU. */
+ * on a moderate-resolution 2D canvas, smoothly upscaled. It exists so the
+ * game still runs — and still looks like itself — on machines where WebGL
+ * is unavailable entirely (the reason this project has it: a real player
+ * hit exactly that). Three.js is used only as camera math here; nothing
+ * touches the GPU.
+ *
+ * It is not a flat-shaded compromise: faces get sun-direction diffuse
+ * lighting, per-pixel ambient occlusion derived from the fractional hit
+ * position against the same edge/corner occluders the WebGL mesher uses,
+ * a world-stable 8x8 procedural texel pattern, distance fog, depth-blended
+ * water, soft clouds, and a sun disc. */
 
 const MAX_DISTANCE = 52;
 const FOG_START = 26;
@@ -24,17 +30,17 @@ const CLOUD_SALT = 0xc10d;
 
 /** Internal render width in pixels; height follows the display aspect.
  * Adapts to keep frame time playable on whatever CPU this lands on. */
-const START_WIDTH = 300;
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 420;
-const FRAME_SLOW_MS = 70;
+const START_WIDTH = 340;
+const MIN_WIDTH = 240;
+const MAX_WIDTH = 560;
+const FRAME_SLOW_MS = 55;
 const FRAME_FAST_MS = 30;
 
-// Face brightness, matching the WebGL mesher's directional shading.
-const SHADE_TOP = 1.0;
-const SHADE_BOTTOM = 0.5;
-const SHADE_X = 0.85;
-const SHADE_Z = 0.75;
+/** How far (in face-fraction units) the edge/corner AO darkening reaches. */
+const AO_REACH = 0.34;
+const AO_STRENGTH = 0.42;
+
+const TEXEL_GRID = 8;
 
 export interface CpuSkyState {
   readonly skyColor: readonly [number, number, number];
@@ -43,6 +49,28 @@ export interface CpuSkyState {
   readonly sunAngle: number;
 }
 
+export interface CpuHighlight {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/** The 12 edges of a unit cube, as index pairs into its 8 corners. */
+const CUBE_EDGES: readonly [number, number][] = [
+  [0, 1],
+  [1, 3],
+  [3, 2],
+  [2, 0],
+  [4, 5],
+  [5, 7],
+  [7, 6],
+  [6, 4],
+  [0, 4],
+  [1, 5],
+  [2, 6],
+  [3, 7],
+];
+
 export class CpuRenderer {
   readonly camera: THREE.PerspectiveCamera;
   readonly domElement: HTMLCanvasElement;
@@ -50,6 +78,7 @@ export class CpuRenderer {
   private readonly world: World;
   private readonly display: CanvasRenderingContext2D;
   private readonly cloudNoise: (x: number, y: number) => number;
+  private readonly corners: THREE.Vector3[] = Array.from({ length: 8 }, () => new THREE.Vector3());
 
   private buffer: HTMLCanvasElement;
   private bufferCtx: CanvasRenderingContext2D;
@@ -57,6 +86,7 @@ export class CpuRenderer {
   private width = START_WIDTH;
   private height = Math.round((START_WIDTH * 9) / 16);
   private frameMsAverage = 33;
+  private highlight: CpuHighlight | null = null;
 
   private sky: CpuSkyState = {
     skyColor: [135 / 255, 206 / 255, 235 / 255],
@@ -81,7 +111,6 @@ export class CpuRenderer {
     this.domElement.height = window.innerHeight;
     this.domElement.style.width = "100%";
     this.domElement.style.height = "100%";
-    this.domElement.style.imageRendering = "pixelated";
     parent.prepend(this.domElement);
     const display = this.domElement.getContext("2d");
     if (!display) throw new Error("2D canvas context is unavailable");
@@ -117,6 +146,11 @@ export class CpuRenderer {
 
   applySky(state: CpuSkyState): void {
     this.sky = state;
+  }
+
+  /** The block the crosshair targets, outlined on top of the render. */
+  setHighlight(target: CpuHighlight | null): void {
+    this.highlight = target;
   }
 
   private adaptResolution(frameMs: number): void {
@@ -160,6 +194,28 @@ export class CpuRenderer {
     const zenithB = skyB * 255;
     const drift = elapsedSeconds * CLOUD_DRIFT_SPEED;
 
+    // Sun direction along its arc; the six face-normal light factors follow
+    // it through the day, so east walls glow in the morning and west walls
+    // in the evening.
+    const sunLen = Math.hypot(
+      Math.cos(this.sky.sunAngle),
+      Math.max(Math.sin(this.sky.sunAngle), 0.12),
+      0.28,
+    );
+    const sunX = Math.cos(this.sky.sunAngle) / sunLen;
+    const sunY = Math.max(Math.sin(this.sky.sunAngle), 0.12) / sunLen;
+    const sunZ = 0.28 / sunLen;
+    const faceLight = (nx: number, ny: number, nz: number): number =>
+      0.4 + 0.62 * Math.max(0, nx * sunX + ny * sunY + nz * sunZ);
+    const lightXPos = faceLight(1, 0, 0);
+    const lightXNeg = faceLight(-1, 0, 0);
+    const lightYPos = faceLight(0, 1, 0);
+    const lightYNeg = 0.4; // straight-down faces only ever see ambient
+    const lightZPos = faceLight(0, 0, 1);
+    const lightZNeg = faceLight(0, 0, -1);
+    // The sun disc fades out as it sets; at night it's gone entirely.
+    const sunVisibility = Math.min(1, Math.max(0, Math.sin(this.sky.sunAngle) * 3));
+
     // Chunk cache: rays revisit the same chunk for many steps in a row.
     let cacheCx = Number.NaN;
     let cacheCz = Number.NaN;
@@ -175,6 +231,10 @@ export class CpuRenderer {
       }
       if (!cacheBuffer) return BlockId.AIR;
       return cacheBuffer[((y << 4) | (z & 15)) * 16 + (x & 15)] ?? BlockId.AIR;
+    };
+    const occludes = (x: number, y: number, z: number): boolean => {
+      const id = blockAt(x, y, z);
+      return id !== BlockId.AIR && id !== BlockId.WATER && id !== BlockId.LEAVES;
     };
 
     // When the eye itself is underwater every ray gets the tint, including
@@ -264,22 +324,65 @@ export class CpuRenderer {
         let b: number;
 
         if (hitId === 0) {
-          // Sky gradient, with a cloud plane crossing.
+          // Sky gradient, sun, and a cloud plane crossing.
           const grad = Math.min(1, Math.max(0, dy * 1.6 + 0.12));
           r = horizonR + (zenithR - horizonR) * grad;
           g = horizonG + (zenithG - horizonG) * grad;
           b = horizonB + (zenithB - horizonB) * grad;
+
+          // Stars: direction-hashed points, fading in as the sun fades out.
+          const starAmount = 1 - Math.min(1, sunVisibility * 2 + light * 0.6);
+          if (starAmount > 0.05 && dy > -0.05) {
+            const qx = (dx * 190) | 0;
+            const qy = (dy * 190) | 0;
+            const qz = (dz * 190) | 0;
+            let sh =
+              (Math.imul(qx, 374761393) ^ Math.imul(qy, 668265263) ^ Math.imul(qz, 2246822519)) >>>
+              0;
+            sh ^= sh >>> 13;
+            sh = Math.imul(sh, 0x5bd1e995) >>> 0;
+            if ((sh & 255) < 3) {
+              const twinkle = 120 + ((sh >>> 8) & 127);
+              const star = starAmount * (twinkle / 255);
+              r += (255 - r) * star;
+              g += (255 - g) * star;
+              b += (255 - b) * star;
+            }
+          }
+
+          if (sunVisibility > 0) {
+            const sunDot = dx * sunX + dy * sunY + dz * sunZ;
+            if (sunDot > 0.97) {
+              const glow = Math.min(1, (sunDot - 0.97) / 0.03);
+              const halo = glow * glow * 0.55 * sunVisibility;
+              r += (255 - r) * halo;
+              g += (244 - g) * halo * 0.92;
+              b += (200 - b) * halo * 0.8;
+              if (sunDot > 0.9992) {
+                const disc = Math.min(1, (sunDot - 0.9992) / 0.0006) * sunVisibility;
+                r += (255 - r) * disc;
+                g += (250 - g) * disc;
+                b += (225 - b) * disc;
+              }
+            }
+          }
+
           if (dy > 0.004 && oy < CLOUD_ALTITUDE) {
             const tc = (CLOUD_ALTITUDE - oy) / dy;
             if (tc < 500) {
               const cellX = Math.floor((ox + dx * tc - drift) / CLOUD_CELL);
               const cellZ = Math.floor((oz + dz * tc) / CLOUD_CELL);
-              if (this.cloudNoise(cellX * 0.35, cellZ * 0.35) > 0.45) {
+              const n = this.cloudNoise(cellX * 0.35, cellZ * 0.35);
+              if (n > 0.4) {
+                // Soft coverage instead of a hard cell threshold.
+                const s = Math.min(1, (n - 0.4) / 0.22);
+                const cover = s * s * (3 - 2 * s);
                 const fade = Math.max(0.25, 1 - tc / 500);
                 const cloud = 235 * light;
-                r += (cloud - r) * 0.85 * fade;
-                g += (cloud - g) * 0.85 * fade;
-                b += (cloud - b) * 0.85 * fade;
+                const alpha = cover * 0.88 * fade;
+                r += (cloud - r) * alpha;
+                g += (cloud - g) * alpha;
+                b += (cloud - b) * alpha;
               }
             }
           }
@@ -287,17 +390,98 @@ export class CpuRenderer {
           const colors = BLOCK_COLORS[hitId as BlockId];
           const face = axis === 1 && entered < 0 ? colors.top : colors.side;
           const shade =
-            axis === 1 ? (entered < 0 ? SHADE_TOP : SHADE_BOTTOM) : axis === 0 ? SHADE_X : SHADE_Z;
-          // Cheap per-voxel speckle so surfaces read as textured, not flat.
-          const hash = ((voxelX * 73856093) ^ (voxelY * 19349663) ^ (voxelZ * 83492791)) >>> 0;
-          const speckle = ((hash & 7) - 3) * 3;
-          const lit = shade * light;
-          r = (face[0] + speckle) * lit;
-          g = (face[1] + speckle) * lit;
-          b = (face[2] + speckle) * lit;
+            axis === 0
+              ? entered < 0
+                ? lightXPos
+                : lightXNeg
+              : axis === 1
+                ? entered < 0
+                  ? lightYPos
+                  : lightYNeg
+                : entered < 0
+                  ? lightZPos
+                  : lightZNeg;
+
+          // Fractional position on the face (in the open cell the ray came
+          // from), along the face's two tangent axes.
+          const px = ox + dx * hitT;
+          const py = oy + dy * hitT;
+          const pz = oz + dz * hitT;
+          let fu: number;
+          let fv: number;
+          if (axis === 0) {
+            fu = py - Math.floor(py);
+            fv = pz - Math.floor(pz);
+          } else if (axis === 1) {
+            fu = px - Math.floor(px);
+            fv = pz - Math.floor(pz);
+          } else {
+            fu = px - Math.floor(px);
+            fv = py - Math.floor(py);
+          }
+
+          const fog = Math.min(1, Math.max(0, (hitT - FOG_START) / (FOG_END - FOG_START)));
+
+          // World-stable 8x8 texel pattern, fading into the fog.
+          const tu = Math.min(TEXEL_GRID - 1, (fu * TEXEL_GRID) | 0);
+          const tv = Math.min(TEXEL_GRID - 1, (fv * TEXEL_GRID) | 0);
+          let hash =
+            (Math.imul(voxelX, 73856093) ^
+              Math.imul(voxelY, 19349663) ^
+              Math.imul(voxelZ, 83492791) ^
+              Math.imul(tu * TEXEL_GRID + tv + axis * 64 + 1, 2654435761)) >>>
+            0;
+          // Murmur-style finalizer: without it, neighboring texel indices
+          // correlate and flat surfaces develop a checkerboard.
+          hash ^= hash >>> 13;
+          hash = Math.imul(hash, 0x5bd1e995) >>> 0;
+          hash ^= hash >>> 15;
+          const texel = ((hash & 15) - 7.5) * 1.3 * (1 - fog);
+
+          // Per-pixel ambient occlusion: the same edge/corner occluders the
+          // WebGL mesher samples, evaluated smoothly against the distance
+          // from this pixel to the face's edges.
+          let aoAmount = 0;
+          if (hitT < FOG_END) {
+            const openX = voxelX - (axis === 0 ? entered : 0);
+            const openY = voxelY - (axis === 1 ? entered : 0);
+            const openZ = voxelZ - (axis === 2 ? entered : 0);
+            const su = fu > 0.5 ? 1 : -1;
+            const sv = fv > 0.5 ? 1 : -1;
+            const du = fu > 0.5 ? 1 - fu : fu;
+            const dvv = fv > 0.5 ? 1 - fv : fv;
+            let side1: boolean;
+            let side2: boolean;
+            let cornerOcc: boolean;
+            if (axis === 0) {
+              side1 = occludes(openX, openY + su, openZ);
+              side2 = occludes(openX, openY, openZ + sv);
+              cornerOcc = occludes(openX, openY + su, openZ + sv);
+            } else if (axis === 1) {
+              side1 = occludes(openX + su, openY, openZ);
+              side2 = occludes(openX, openY, openZ + sv);
+              cornerOcc = occludes(openX + su, openY, openZ + sv);
+            } else {
+              side1 = occludes(openX + su, openY, openZ);
+              side2 = occludes(openX, openY + sv, openZ);
+              cornerOcc = occludes(openX + su, openY + sv, openZ);
+            }
+            const rampU = du < AO_REACH ? 1 - du / AO_REACH : 0;
+            const rampV = dvv < AO_REACH ? 1 - dvv / AO_REACH : 0;
+            if (side1) aoAmount = rampU * rampU;
+            if (side2) aoAmount = Math.max(aoAmount, rampV * rampV);
+            if (cornerOcc && !side1 && !side2) {
+              const rc = rampU * rampV;
+              aoAmount = Math.max(aoAmount, rc * rc);
+            }
+          }
+
+          const lit = shade * light * (1 - AO_STRENGTH * aoAmount);
+          r = (face[0] + texel) * lit;
+          g = (face[1] + texel) * lit;
+          b = (face[2] + texel) * lit;
 
           // Fog toward the horizon color.
-          const fog = Math.min(1, Math.max(0, (hitT - FOG_START) / (FOG_END - FOG_START)));
           r += (horizonR - r) * fog;
           g += (horizonG - g) * fog;
           b += (horizonB - b) * fog;
@@ -324,7 +508,9 @@ export class CpuRenderer {
     }
 
     this.bufferCtx.putImageData(this.image, 0, 0);
-    this.display.imageSmoothingEnabled = false;
+    // Smooth upscale: the browser's bilinear filter is the anti-aliasing
+    // pass — crisp enough to read blocks, soft enough to kill stair-steps.
+    this.display.imageSmoothingEnabled = true;
     this.display.drawImage(
       this.buffer,
       0,
@@ -337,7 +523,38 @@ export class CpuRenderer {
       this.domElement.height,
     );
 
+    this.drawHighlight();
+
     this.adaptResolution(performance.now() - started);
+  }
+
+  /** Projects the targeted block's edges onto the display canvas — the CPU
+   * path has no scene graph, so the outline is plain 2D line drawing. */
+  private drawHighlight(): void {
+    const target = this.highlight;
+    if (!target) return;
+    const w = this.domElement.width;
+    const h = this.domElement.height;
+
+    for (let c = 0; c < 8; c++) {
+      const corner = this.corners[c];
+      if (!corner) return;
+      corner.set(target.x + (c & 1), target.y + ((c >> 1) & 1), target.z + ((c >> 2) & 1));
+      corner.project(this.camera);
+      if (corner.z > 1 || corner.z < -1) return; // clipped: skip the outline
+    }
+
+    this.display.strokeStyle = "rgba(10, 10, 10, 0.8)";
+    this.display.lineWidth = Math.max(1.5, w / 700);
+    this.display.beginPath();
+    for (const [a, b] of CUBE_EDGES) {
+      const ca = this.corners[a];
+      const cb = this.corners[b];
+      if (!ca || !cb) continue;
+      this.display.moveTo((ca.x * 0.5 + 0.5) * w, (0.5 - ca.y * 0.5) * h);
+      this.display.lineTo((cb.x * 0.5 + 0.5) * w, (0.5 - cb.y * 0.5) * h);
+    }
+    this.display.stroke();
   }
 
   /** Exposed for the HUD: current internal resolution, for the curious. */
