@@ -31,8 +31,10 @@ export interface GameScene {
  * of the device pixel ratio (capped at 2). */
 const SCALE_LADDER = [0.5, 0.65, 0.8, 1.0] as const;
 const ADAPT_WINDOW_FRAMES = 70;
-const ADAPT_SLOW_MS = 24;
-const ADAPT_FAST_MS = 13;
+// Biased toward frame rate: step the render scale down before frames drift
+// past ~20ms (~50fps), so phones stay fluid.
+const ADAPT_SLOW_MS = 20;
+const ADAPT_FAST_MS = 12;
 
 /** Sets up the Three.js scene, camera, renderer, sky, and lighting. No
  * voxel-specific knowledge lives here — ChunkMeshManager adds and removes

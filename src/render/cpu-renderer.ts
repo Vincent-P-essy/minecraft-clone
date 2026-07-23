@@ -36,11 +36,14 @@ const CLOUD_SALT = 0xc10d;
 
 /** Internal render width in pixels; height follows the display aspect.
  * Adapts to keep frame time at a fluid clip on whatever CPU this lands on. */
-const START_WIDTH = 440;
-const MIN_WIDTH = 260;
+const START_WIDTH = 420;
+const MIN_WIDTH = 240;
 const MAX_WIDTH = 720;
-const FRAME_SLOW_MS = 34;
-const FRAME_FAST_MS = 16;
+// Tuned toward frame rate: the adaptive controller seeks the internal
+// resolution that keeps a frame under ~20ms (~50fps), dropping resolution
+// before it drops below that rather than holding a crisp-but-choppy image.
+const FRAME_SLOW_MS = 20;
+const FRAME_FAST_MS = 11;
 
 /** Traced neighbors must agree in signature and sit within this many
  * blocks of depth of each other for the pixel between them to interpolate. */
