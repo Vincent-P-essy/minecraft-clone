@@ -17,12 +17,19 @@ body {
     "Segoe UI",
     sans-serif;
   background: #000;
+  /* No pull-to-refresh, no rubber-banding, no double-tap zoom while playing. */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #app {
   position: relative;
   width: 100vw;
   height: 100vh;
+  /* The whole play surface owns its gestures; the browser must not pan/zoom. */
+  touch-action: none;
 }
 
 canvas {
@@ -155,4 +162,86 @@ canvas {
   font-size: 12px;
   z-index: 5;
   text-shadow: 0 0 2px #000;
+}
+
+/* --- Touch controls --- */
+/* By default show desktop instructions; touch devices swap them below. */
+.controls-touch {
+  display: none;
+}
+
+.touch-stick-base {
+  position: fixed;
+  width: 132px;
+  height: 132px;
+  margin: -66px 0 0 -66px; /* center on the touch point */
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  z-index: 6;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.touch-stick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+}
+
+.touch-buttons {
+  position: fixed;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  display: none;
+  flex-direction: row;
+  gap: 16px;
+  z-index: 6;
+}
+
+.touch-button {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-button:active {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Touch devices: swap the instruction blocks and grow the tap targets. */
+@media (pointer: coarse) {
+  .controls-desktop {
+    display: none;
+  }
+  .controls-touch {
+    display: block;
+  }
+  .hotbar-slot {
+    width: 40px;
+    height: 40px;
+  }
+  #hotbar {
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  /* Lift the action buttons clear of the hotbar row on narrow portrait
+     screens (the hotbar spans most of the width). */
+  .touch-buttons {
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 64px);
+  }
 }

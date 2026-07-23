@@ -21,27 +21,29 @@ TypeScript: procedurally generated infinite terrain with forests, deserts,
 snowy peaks and cave systems, a full day/night cycle, and free block
 building — with your edits persisted across reloads.
 
-|                       |                                           |
-| --------------------- | ----------------------------------------- |
-| Move / jump / sprint  | `WASD` · `Space` · `Shift`                |
-| Swim                  | `Space` in water (hop out at the surface) |
-| Look                  | mouse (pointer lock — click to start)     |
-| Break / place a block | left click (hold to repeat) / right click |
-| Pick a block          | `1`-`9` or scroll wheel                   |
-| Share your world      | add `?seed=<number>` to the URL           |
+|                       | Desktop                                   | Touch                                        |
+| --------------------- | ----------------------------------------- | -------------------------------------------- |
+| Move / jump / sprint  | `WASD` · `Space` · `Shift`                | left-thumb joystick (push to edge to sprint) |
+| Swim                  | `Space` in water (hop out at the surface) | jump button in water                         |
+| Look                  | mouse (pointer lock — click to start)     | drag the right half of the screen            |
+| Break / place a block | left click (hold to repeat) / right click | tap to break · place button                  |
+| Pick a block          | `1`-`9` or scroll wheel                   | tap a hotbar slot                            |
+| Share your world      | add `?seed=<number>` to the URL           | same                                         |
+
+**It plays on your phone.** On a touch device the game grows a floating
+joystick, a look surface, and jump/place buttons — no keyboard needed:
+
+<p align="center"><img src="docs/screenshot-mobile.png" alt="The game on a phone in portrait, with a floating movement joystick and jump/place buttons" width="300"></p>
 
 If your browser refuses pointer lock (some extensions and embedded contexts
-block it silently), the game switches to **drag-to-look** on its own: drag
-with the left button to look around, tap to break. And if your machine has
-**no WebGL at all**, the game doesn't apologize — it switches to its own
-**CPU raycaster** (one DDA ray per pixel on a 2D canvas, adaptive
-resolution) and keeps playing:
+block it silently), the desktop game switches to **drag-to-look** on its
+own. And if your machine has **no WebGL at all**, the game doesn't
+apologize — it switches to its own **CPU raycaster** and keeps playing:
 
 ![The same bay rendered by the CPU raycaster: chunky pixels, clouds, an island with a tree](docs/screenshot-cpu.png)
 
 _Same world, same physics, same controls — zero GPU. This mode exists
-because a real player hit exactly that; their machine now runs the game at
-30-40 fps in pure JavaScript._
+because a real player hit exactly that._
 
 ## What's inside
 
@@ -87,13 +89,29 @@ flowchart LR
   block data (no meshes at all) with the same face shading, fog, water
   tint, clouds and day/night palette. Everything else — world, streaming,
   physics, interaction — is shared and renderer-blind.
+- **It runs fast on weak hardware, and stays fast.** The CPU raycaster only
+  traces a real ray for one pixel in four: each traced ray records a
+  compact hit signature, and the pixels between them interpolate wherever
+  their neighbors agree (flat surfaces, sky, open water) and re-trace only
+  across silhouettes and edges — a quarter of the ray budget for a
+  near-identical image, so it holds a high internal resolution. Block
+  reads in the hot loop go through a flat chunk lookup table, not a hash
+  map. Both renderers watch their own frame time and trade resolution for
+  smoothness: the CPU path scales its internal buffer (260–720px), the
+  WebGL path steps its device-pixel-ratio down a ladder — so a phone GPU
+  and a desktop GPU both converge on a fluid frame rate instead of a fixed
+  quality that's wrong for one of them.
+- **Input-agnostic core.** Keyboard, mouse, drag-look, and the on-screen
+  touch controls all feed the same controller and interaction through a
+  tiny surface (`setExternalInput`, `lookBy`, `breakTargetedBlock`). Adding
+  the entire mobile control scheme touched no game logic.
 
 ## Development
 
 ```sh
 npm ci
 npm run dev          # local dev server
-npm run test         # 204 offline tests (world, mesher, physics, raycast, streaming, sky)
+npm run test         # 211 offline tests (world, mesher, physics, raycast, streaming, sky, input)
 npm run lint && npm run typecheck
 npm run build        # production bundle
 ```
@@ -112,12 +130,14 @@ neighboring column it picks by inspecting the world, breaks the block
 underfoot, walks — then opens a second page with `requestPointerLock`
 sabotaged to prove the drag-look fallback engages and stays fully playable
 (move, look, tap-break), a third page with `getContext('webgl')` sabotaged
-to prove the CPU raycaster boots, renders real terrain, moves and breaks —
-and checks the console stayed clean. 18 end-to-end checks with
-screenshots. It exists because unit tests can't see: the one real
-rendering bug this project shipped (an atlas UV/`flipY` mismatch that made
-grass sample an empty atlas region and leaves sample sand) was invisible
-to every unit test and obvious in the harness's first screenshot.
+to prove the CPU raycaster boots, renders real terrain, moves and breaks,
+and a fourth emulating a **phone with a touchscreen** — proving the game
+detects touch, shows its on-screen controls, and is fully playable with a
+joystick drag and taps. 23 end-to-end checks with screenshots. It exists
+because unit tests can't see: the one real rendering bug this project
+shipped (an atlas UV/`flipY` mismatch that made grass sample an empty
+atlas region and leaves sample sand) was invisible to every unit test and
+obvious in the harness's first screenshot.
 
 ```sh
 npm run build && npx vite preview --port 4173 &
@@ -153,6 +173,9 @@ node scripts/screenshot.mjs                   # regenerates docs/screenshot.png
   texels instead of the full atlas and ~50 blocks of view distance. It
   still carries per-pixel ambient occlusion, sun-tracked face lighting, a
   sun disc, night stars, soft clouds, and the block-outline highlight.
+  Its edge-adaptive sampling assumes neighboring pixels usually agree;
+  that holds for blocky terrain but would smear a scene full of
+  fine per-pixel detail (which this one never has).
 - Water supports swimming (buoyancy, swim up, hop onto the shore) but
   doesn't flow — breaking a dam doesn't flood anything.
 - No mobs, crafting, or inventory beyond the hotbar — the scope is the

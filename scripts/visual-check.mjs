@@ -377,6 +377,115 @@ try {
   }
   await cpuPage.close();
 
+  // ---- mobile / touch (emulated phone with a touchscreen) ----
+  // Proves the game detects a touch device, shows on-screen controls, and
+  // is fully playable with thumb + drag + tap — no keyboard, no mouse.
+  const mobilePage = await browser.newPage();
+  await mobilePage.setViewport({
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    isMobile: true,
+    hasTouch: true,
+  });
+  const touch = (type, x, y, id = 1) =>
+    mobilePage.evaluate(
+      (a) => {
+        const target = document.elementFromPoint(a.x, a.y) ?? document.body;
+        target.dispatchEvent(
+          new PointerEvent(a.type, {
+            pointerId: a.id,
+            pointerType: "touch",
+            clientX: a.x,
+            clientY: a.y,
+            bubbles: true,
+            cancelable: true,
+            isPrimary: true,
+          }),
+        );
+      },
+      { type, x, y, id },
+    );
+
+  await mobilePage.goto(URL_UNDER_TEST, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await mobilePage.waitForFunction(() => window.__mc && window.__mc.loadedChunks() >= 9, {
+    timeout: 120_000,
+    polling: 500,
+  });
+
+  const isTouch = await mobilePage.evaluate(() => window.__mc.touch());
+  report("touch device is detected", isTouch === true, `touch=${isTouch}`);
+
+  await mobilePage.click("#play-button");
+  await mobilePage
+    .waitForFunction(() => window.__mc.mode() !== "idle", { timeout: 5_000, polling: 100 })
+    .catch(() => undefined);
+  const active = await mobilePage.evaluate(() => window.__mc.mode());
+  report("tapping play starts the game (drag mode) on touch", active === "drag", `mode=${active}`);
+
+  const controlsShown = await mobilePage.evaluate(() => {
+    const buttons = document.querySelector(".touch-buttons");
+    const visible = buttons ? getComputedStyle(buttons).display !== "none" : false;
+    const count = document.querySelectorAll(".touch-button").length;
+    return { visible, count };
+  });
+  report(
+    "on-screen jump/place buttons are shown",
+    controlsShown.visible && controlsShown.count === 2,
+    `visible=${controlsShown.visible}, buttons=${controlsShown.count}`,
+  );
+
+  // Joystick: press bottom-left, push up (forward), hold, release.
+  const beforeMove = await mobilePage.evaluate(() => window.__mc.position());
+  await touch("pointerdown", 110, 620, 1);
+  await touch("pointermove", 110, 560, 1);
+  await touch("pointermove", 110, 545, 1);
+  await new Promise((r) => setTimeout(r, 1600));
+  await touch("pointerup", 110, 545, 1);
+  const afterMove = await mobilePage.evaluate(() => window.__mc.position());
+  const moved = Math.hypot(afterMove.x - beforeMove.x, afterMove.z - beforeMove.z);
+  report("the joystick moves the player", moved > 1, `moved ${moved.toFixed(1)} blocks`);
+
+  // Look down with a right-side drag, then a quick tap to break.
+  for (let step = 0; step < 6; step++) {
+    await touch(step === 0 ? "pointerdown" : "pointermove", 300, 260 + step * 70, 2);
+  }
+  await touch("pointerup", 300, 660, 2);
+  await new Promise((r) => setTimeout(r, 300));
+  const mobileTarget = await mobilePage.evaluate(() => window.__mc.target());
+  if (mobileTarget) {
+    // A genuine quick tap: down and up in one round trip, so the in-page
+    // elapsed time stays inside the tap window (separate evaluate calls can
+    // drift past it and be correctly treated as a drag, not a tap).
+    await mobilePage.evaluate(
+      (a) => {
+        const target = document.elementFromPoint(a.x, a.y) ?? document.body;
+        const opts = {
+          pointerType: "touch",
+          pointerId: a.id,
+          clientX: a.x,
+          clientY: a.y,
+          bubbles: true,
+          cancelable: true,
+          isPrimary: true,
+        };
+        target.dispatchEvent(new PointerEvent("pointerdown", opts));
+        target.dispatchEvent(new PointerEvent("pointerup", opts));
+      },
+      { x: 300, y: 300, id: 3 },
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    const afterTap = await mobilePage.evaluate(
+      (t) => window.__mc.blockAt(t.x, t.y, t.z),
+      mobileTarget,
+    );
+    report("tap breaks the targeted block on touch", afterTap === 0, `block is now id ${afterTap}`);
+  } else {
+    report("tap breaks the targeted block on touch", false, "no target under crosshair");
+  }
+  await mobilePage.screenshot({ path: path.join(OUT_DIR, "07-mobile.png") });
+  await mobilePage.close();
+
   // ---- console stayed clean ----
   const realErrors = consoleErrors.filter((e) => !e.includes("favicon"));
   report("no console errors", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));

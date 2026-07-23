@@ -10,6 +10,7 @@ import { PlayerController } from "./player/controller";
 import { BlockInteraction } from "./player/interaction";
 import { Hotbar } from "./ui/hotbar";
 import { Hud } from "./ui/hud";
+import { isTouchDevice, TouchControls } from "./ui/touch-controls";
 import { EditStore } from "./world/edit-store";
 import { findPleasantSpawn } from "./world/spawn";
 import {
@@ -37,6 +38,7 @@ declare global {
       pitch: () => number;
       mode: () => string;
       renderer: () => "webgl" | "cpu";
+      touch: () => boolean;
       loadedChunks: () => number;
       meshedChunks: () => number;
       pendingChunks: () => number;
@@ -74,6 +76,11 @@ interface GameView {
   render(elapsedSeconds: number): void;
   resize(width: number, height: number): void;
   applySky(state: ReturnType<typeof skyStateAt>): void;
+  /** Optional adaptive quality hook (WebGL scales its pixel ratio; the CPU
+   * renderer already adapts its own internal resolution). */
+  tickAdaptive?(frameMs: number): void;
+  /** A short label for the HUD describing the current quality target. */
+  qualityNote(): string;
 }
 
 function boot(): void {
@@ -108,6 +115,8 @@ function boot(): void {
       },
       resize: gameScene.resize,
       applySky: gameScene.applySky,
+      tickAdaptive: gameScene.tickAdaptive,
+      qualityNote: () => `${Math.round(gameScene.pixelRatio() * 100)}% scale`,
     };
     chunkMeshes = new ChunkMeshManager(gameScene.scene, world, createChunkMaterial(atlas.texture));
     clouds = new Clouds(gameScene.scene, SEED);
@@ -134,6 +143,7 @@ function boot(): void {
       applySky: (state) => {
         cpu.applySky(state);
       },
+      qualityNote: () => `cpu ${cpu.internalWidth.toString()}p`,
     };
   }
 
@@ -177,6 +187,26 @@ function boot(): void {
     editStore.record(x, y, z, id);
   };
 
+  // On-screen controls for touch devices — joystick, look-drag, jump/place.
+  const touchControls = isTouchDevice()
+    ? new TouchControls(app, {
+        isActive: () => player.isActive,
+        onInput: (input) => {
+          player.setExternalInput(input);
+        },
+        onLook: (dx, dy) => {
+          player.lookBy(dx, dy);
+        },
+        onBreak: () => {
+          interaction.breakTargetedBlock();
+        },
+        onPlace: () => {
+          interaction.placeTargetedBlock();
+        },
+      })
+    : null;
+  let touchVisible = false;
+
   const hud = new Hud(app);
 
   window.addEventListener("resize", () => {
@@ -193,6 +223,7 @@ function boot(): void {
     pitch: () => player.eyePitch,
     mode: () => player.mode,
     renderer: () => view.kind,
+    touch: () => touchControls !== null,
     loadedChunks: () => world.loadedChunkCount,
     meshedChunks: () => chunkMeshes?.meshedChunkCount ?? world.loadedChunkCount,
     pendingChunks: () => streamer.pendingCount,
@@ -202,9 +233,19 @@ function boot(): void {
   const startedAt = performance.now();
   let lastTime = startedAt;
   const frame = (time: number): void => {
-    const dt = Math.min((time - lastTime) / 1000, 0.1); // clamp to avoid a huge step after a tab switch
+    const frameDelta = time - lastTime;
+    const dt = Math.min(frameDelta / 1000, 0.1); // clamp to avoid a huge step after a tab switch
     lastTime = time;
     const elapsed = (time - startedAt) / 1000 + STARTUP_PHASE * DAY_LENGTH_SECONDS;
+
+    // Adaptive quality: feed the real frame cadence so the renderer can
+    // trade resolution for a fluid frame rate on weaker (mobile) hardware.
+    view.tickAdaptive?.(frameDelta);
+
+    if (touchControls && player.isActive !== touchVisible) {
+      touchVisible = player.isActive;
+      touchControls.setVisible(touchVisible);
+    }
 
     streamer.update(player.position.x, player.position.z);
     player.update(dt);
@@ -231,7 +272,7 @@ function boot(): void {
       z: player.position.z,
       chunks: world.loadedChunkCount,
       seed: SEED,
-      ...(view.kind === "cpu" ? { note: "cpu renderer" } : {}),
+      note: view.qualityNote(),
     });
 
     view.render(elapsed);

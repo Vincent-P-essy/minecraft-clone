@@ -39,6 +39,8 @@ export default defineConfig(
         Element: "readonly",
         HTMLCanvasElement: "readonly",
         MouseEvent: "readonly",
+        PointerEvent: "readonly",
+        getComputedStyle: "readonly",
         Image: "readonly",
       },
     },

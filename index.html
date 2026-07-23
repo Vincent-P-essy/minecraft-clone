@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#87ceeb" />
     <meta
       name="description"
       content="A Minecraft-inspired voxel world in the browser: infinite procedural terrain, break and place blocks, no install."
@@ -17,10 +23,17 @@
       <div id="overlay">
         <div id="overlay-content">
           <h1>minecraft-clone</h1>
-          <p>WASD to move &middot; mouse to look &middot; space to jump</p>
-          <p>left click breaks a block &middot; right click places one</p>
-          <p>1-9 or scroll to pick a block</p>
-          <button id="play-button" type="button">Click to play</button>
+          <p class="controls-desktop">
+            WASD to move &middot; mouse to look &middot; space to jump<br />
+            left click breaks a block &middot; right click places one<br />
+            1-9 or scroll to pick a block
+          </p>
+          <p class="controls-touch">
+            left thumb to move &middot; drag the right side to look<br />
+            tap to break &middot; the buttons jump and place<br />
+            tap a slot to pick a block
+          </p>
+          <button id="play-button" type="button">Tap to play</button>
         </div>
       </div>
     </div>

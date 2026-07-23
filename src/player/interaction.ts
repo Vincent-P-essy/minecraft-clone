@@ -122,7 +122,9 @@ export class BlockInteraction {
     );
   }
 
-  private breakTargetedBlock(): void {
+  /** Break the block under the crosshair. Public: the touch controls call
+   * this directly (tap), bypassing the mouse-event plumbing. */
+  breakTargetedBlock(): void {
     const hit = this.raycastFromCamera();
     if (!hit) return;
     const current = this.world.getBlock(hit.blockX, hit.blockY, hit.blockZ);
@@ -133,7 +135,9 @@ export class BlockInteraction {
     this.remesh(hit.blockX, hit.blockZ);
   }
 
-  private placeTargetedBlock(): void {
+  /** Place the hotbar's block against the targeted face. Public for the
+   * touch controls (long-press / place button). */
+  placeTargetedBlock(): void {
     const hit = this.raycastFromCamera();
     if (!hit) return;
     if (this.world.getBlock(hit.placeX, hit.placeY, hit.placeZ) !== BlockId.AIR) return;

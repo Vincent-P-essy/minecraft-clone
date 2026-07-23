@@ -139,8 +139,13 @@ export class PlayerController {
   }
 
   /** Ask for pointer lock; if the browser quietly never grants it, fall
-   * back to drag-look so the game starts regardless. */
+   * back to drag-look so the game starts regardless. Touch-first devices
+   * skip the pointer-lock dance entirely — there is no pointer to lock. */
   private requestControl(): void {
+    if (window.matchMedia("(pointer: coarse)").matches) {
+      this.enterMode("drag");
+      return;
+    }
     if (this.lockWatchdog) clearTimeout(this.lockWatchdog);
     this.lockWatchdog = setTimeout(() => {
       if (this.controlMode === "idle") this.enterMode("drag");
@@ -168,6 +173,24 @@ export class PlayerController {
     this.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.pitch));
   }
 
+  /** Camera rotation from an external source (the touch controls' look
+   * surface), in pixels of drag. */
+  lookBy(pixelsX: number, pixelsY: number): void {
+    if (this.controlMode === "idle") return;
+    this.applyLook(pixelsX, pixelsY, DRAG_SENSITIVITY);
+  }
+
+  /** Movement from an external source (the touch controls' joystick),
+   * merged with whatever the keyboard says every frame. */
+  setExternalInput(
+    input: { forward: number; right: number; jump: boolean; sprint: boolean } | null,
+  ): void {
+    this.external = input;
+  }
+
+  private external: { forward: number; right: number; jump: boolean; sprint: boolean } | null =
+    null;
+
   private currentInput(): { forward: number; right: number; jump: boolean; sprint: boolean } {
     let forward = 0;
     let right = 0;
@@ -181,6 +204,12 @@ export class PlayerController {
       else if (action === "left") right -= 1;
       else if (action === "jump") jump = true;
       else if (action === "sprint") sprint = true;
+    }
+    if (this.external) {
+      forward = Math.max(-1, Math.min(1, forward + this.external.forward));
+      right = Math.max(-1, Math.min(1, right + this.external.right));
+      jump = jump || this.external.jump;
+      sprint = sprint || this.external.sprint;
     }
     return { forward, right, jump, sprint };
   }
