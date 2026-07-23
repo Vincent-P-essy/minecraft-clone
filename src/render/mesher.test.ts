@@ -17,6 +17,16 @@ function faceCount(mesh: MeshData): number {
   return mesh.indices.length / 6; // 6 indices (2 triangles) per quad face
 }
 
+/** Counts quads whose normal matches — each quad is 4 consecutive vertices. */
+function countFacesWithNormal(mesh: MeshData, nx: number, ny: number, nz: number): number {
+  let count = 0;
+  for (let v = 0; v < mesh.normals.length / 3; v += 4) {
+    const i = v * 3;
+    if (mesh.normals[i] === nx && mesh.normals[i + 1] === ny && mesh.normals[i + 2] === nz) count++;
+  }
+  return count;
+}
+
 describe("shouldRenderFace", () => {
   it("air never renders a face", () => {
     expect(shouldRenderFace(BlockId.AIR, BlockId.STONE)).toBe(false);
@@ -94,13 +104,68 @@ describe("meshChunk on a single isolated block", () => {
 });
 
 describe("meshChunk between two solid neighbors", () => {
-  it("culls the shared interior face from both sides", () => {
+  it("culls the shared interior face and greedily merges the coplanar rest", () => {
     const chunk = new Chunk(0, 0);
     chunk.setBlock(4, 4, 4, BlockId.STONE);
     chunk.setBlock(5, 4, 4, BlockId.STONE); // touching along +X/-X
     const mesh = meshChunk(chunk, allAir);
-    // 2 isolated cubes would be 12 faces; the touching pair hides 2 (one from each side).
-    expect(faceCount(mesh)).toBe(10);
+    // The interior faces are culled; every remaining pair of coplanar faces
+    // (top, bottom, north, south) merges into one quad, plus the two outer
+    // end caps (+X, -X). 2 isolated cubes would be 12 faces; this is 6.
+    expect(faceCount(mesh)).toBe(6);
+  });
+});
+
+describe("greedy meshing", () => {
+  it("merges a flat NxN slab's top into a single quad", () => {
+    const chunk = new Chunk(0, 0);
+    for (let x = 0; x < 6; x++) {
+      for (let z = 0; z < 6; z++) {
+        chunk.setBlock(x, 4, z, BlockId.STONE);
+      }
+    }
+    const mesh = meshChunk(chunk, allAir);
+    // Per-face meshing would emit 36 top quads; greedy merges the flat,
+    // AO-uniform top into 1. The whole 6x6x1 slab is a handful of quads,
+    // nowhere near 6 faces x 36 blocks.
+    const topQuads = countFacesWithNormal(mesh, 0, 1, 0);
+    expect(topQuads).toBe(1);
+    expect(faceCount(mesh)).toBeLessThan(20);
+  });
+
+  it("keeps faces separate where ambient occlusion varies (a block on the slab)", () => {
+    const chunk = new Chunk(0, 0);
+    for (let x = 0; x < 6; x++) {
+      for (let z = 0; z < 6; z++) {
+        chunk.setBlock(x, 4, z, BlockId.STONE);
+      }
+    }
+    // A bump in the middle shadows nearby top faces, so their AO is no
+    // longer uniform and they can't all fold into one quad.
+    chunk.setBlock(3, 5, 3, BlockId.STONE);
+    const mesh = meshChunk(chunk, allAir);
+    expect(countFacesWithNormal(mesh, 0, 1, 0)).toBeGreaterThan(1);
+  });
+
+  it("a merged quad's UVs span its full size so the shader can repeat the tile", () => {
+    const chunk = new Chunk(0, 0);
+    for (let x = 0; x < 4; x++) chunk.setBlock(x, 4, 0, BlockId.STONE);
+    const mesh = meshChunk(chunk, allAir);
+    let maxU = 0;
+    for (const u of mesh.uvs) maxU = Math.max(maxU, u);
+    // The top strip is 4 blocks long, so a UV coordinate reaches 4 (not 1).
+    expect(maxU).toBeGreaterThanOrEqual(4);
+  });
+
+  it("assigns every vertex the tile layer for its block face", () => {
+    const chunk = new Chunk(0, 0);
+    chunk.setBlock(2, 2, 2, BlockId.STONE);
+    const mesh = meshChunk(chunk, allAir);
+    // TileKind.STONE is 3; every stone vertex carries layer 3.
+    for (const layer of mesh.layers) {
+      expect(layer).toBe(3);
+    }
+    expect(mesh.layers.length).toBe(mesh.positions.length / 3);
   });
 });
 

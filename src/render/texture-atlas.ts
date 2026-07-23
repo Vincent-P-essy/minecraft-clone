@@ -1,5 +1,11 @@
 import * as THREE from "three";
-import { ATLAS_PIXELS, ATLAS_TILE_SIZE, TileKind, tileGridPosition } from "./atlas-layout";
+import {
+  ALL_TILE_KINDS,
+  ATLAS_PIXELS,
+  ATLAS_TILE_SIZE,
+  TileKind,
+  tileGridPosition,
+} from "./atlas-layout";
 import { mulberry32 } from "../world/rng";
 
 interface TileStyle {
@@ -43,15 +49,17 @@ function clamp255(v: number): number {
   return Math.max(0, Math.min(255, v));
 }
 
-function paintTile(
+/** Paints one tile at an explicit pixel offset — used both to fill the
+ * atlas grid (for hotbar icons) and to fill each layer of the block
+ * texture array (for chunk rendering). */
+function paintTileAt(
   ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
   seed: number,
   tile: TileKind,
-  style: TileStyle,
 ): void {
-  const { col, row } = tileGridPosition(tile);
-  const x = col * ATLAS_TILE_SIZE;
-  const y = row * ATLAS_TILE_SIZE;
+  const style = TILE_STYLES[tile];
   const [r, g, b] = style.base;
 
   ctx.fillStyle = `rgba(${r.toString()}, ${g.toString()}, ${b.toString()}, ${(style.alpha / 255).toString()})`;
@@ -111,8 +119,9 @@ export function createTextureAtlas(seed = 1): BlockTextureAtlas {
   if (!ctx) throw new Error("2D canvas context is unavailable");
 
   ctx.imageSmoothingEnabled = false;
-  for (const [tileKey, style] of Object.entries(TILE_STYLES)) {
-    paintTile(ctx, seed, Number(tileKey) as TileKind, style);
+  for (const tile of ALL_TILE_KINDS) {
+    const { col, row } = tileGridPosition(tile);
+    paintTileAt(ctx, col * ATLAS_TILE_SIZE, row * ATLAS_TILE_SIZE, seed, tile);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -129,4 +138,35 @@ export function createTextureAtlas(seed = 1): BlockTextureAtlas {
   texture.needsUpdate = true;
 
   return { texture, canvas };
+}
+
+/** Builds a WebGL2 texture array — one 16x16 layer per tile kind, indexed
+ * by TileKind. Greedy-meshed quads span many blocks, so the chunk shader
+ * samples this with a repeating UV (`fract`) and a per-vertex layer, which
+ * an atlas can't do without bleeding into neighboring tiles. */
+export function createBlockTextureArray(seed = 1): THREE.DataArrayTexture {
+  const size = ATLAS_TILE_SIZE;
+  const depth = ALL_TILE_KINDS.length;
+  const data = new Uint8Array(size * size * depth * 4);
+
+  const tileCanvas = document.createElement("canvas");
+  tileCanvas.width = size;
+  tileCanvas.height = size;
+  const ctx = tileCanvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("2D canvas context is unavailable");
+  ctx.imageSmoothingEnabled = false;
+
+  for (const tile of ALL_TILE_KINDS) {
+    ctx.clearRect(0, 0, size, size);
+    paintTileAt(ctx, 0, 0, seed, tile);
+    const { data: pixels } = ctx.getImageData(0, 0, size, size);
+    data.set(pixels, tile * size * size * 4);
+  }
+
+  const texture = new THREE.DataArrayTexture(data, size, size, depth);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
 }

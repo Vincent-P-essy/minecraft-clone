@@ -53,8 +53,8 @@ flowchart LR
     T --> W["Web Worker<br/>chunk generation"]
     W -->|transferable buffers| ST["streamer.ts<br/>load/unload around player"]
     E[("localStorage<br/>edit overlay")] --> ST
-    ST --> M["mesher.ts<br/>face culling · per-vertex AO"]
-    M --> R["Three.js scene<br/>day/night sky · clouds"]
+    ST --> M["mesher.ts<br/>greedy meshing · per-vertex AO"]
+    M --> R["Three.js scene<br/>texture-array shader<br/>day/night sky · clouds"]
     P["player<br/>swept AABB physics<br/>DDA voxel raycast"] --> ST
     P --> R
 ```
@@ -68,11 +68,15 @@ flowchart LR
 - **Generation runs in a Web Worker.** Block buffers come back as
   transferables (zero copy); the main thread only meshes, on a fixed
   per-frame budget, so walking into new terrain doesn't hitch.
-- **The mesher bakes real ambient occlusion.** Per-vertex, the classic
-  "0fps" formulation, with each quad's diagonal flipped toward the brighter
-  vertex pair to kill the anisotropic dark-streak artifact. Combined with
-  directional face shading, it's what makes a world with one light source
-  read as _lit_ instead of flat.
+- **The mesher greedy-meshes with real ambient occlusion.** Per-vertex AO
+  (the classic "0fps" formulation, with each quad's diagonal flipped toward
+  the brighter vertex pair to kill the anisotropic dark-streak artifact),
+  and then coplanar faces that share a tile and the exact same 4-corner AO
+  pattern merge into one big quad — ~25% fewer triangles over real terrain,
+  and far fewer on flat expanses. Because merged quads span many blocks,
+  chunks render from a **WebGL2 texture array** through a custom shader that
+  repeats the tile with `fract()` (an atlas would bleed into its
+  neighbors), keeping one draw call per chunk and the crisp per-block grid.
 - **Zero art assets.** The entire texture atlas (grass, sand, wood rings,
   bark, water...) is drawn onto a small canvas at startup with a seeded
   PRNG. The hotbar icons are cropped from the same canvas.
@@ -100,7 +104,8 @@ flowchart LR
   smoothness: the CPU path scales its internal buffer (260–720px), the
   WebGL path steps its device-pixel-ratio down a ladder — so a phone GPU
   and a desktop GPU both converge on a fluid frame rate instead of a fixed
-  quality that's wrong for one of them.
+  quality that's wrong for one of them. The triangle savings from greedy
+  meshing are spent on more draw distance, not just more frames.
 - **Input-agnostic core.** Keyboard, mouse, drag-look, and the on-screen
   touch controls all feed the same controller and interaction through a
   tiny surface (`setExternalInput`, `lookBy`, `breakTargetedBlock`). Adding
@@ -111,7 +116,7 @@ flowchart LR
 ```sh
 npm ci
 npm run dev          # local dev server
-npm run test         # 211 offline tests (world, mesher, physics, raycast, streaming, sky, input)
+npm run test         # 216 offline tests (world, mesher, physics, raycast, streaming, sky, input)
 npm run lint && npm run typecheck
 npm run build        # production bundle
 ```
@@ -180,8 +185,9 @@ node scripts/screenshot.mjs                   # regenerates docs/screenshot.png
   doesn't flow — breaking a dam doesn't flood anything.
 - No mobs, crafting, or inventory beyond the hotbar — the scope is the
   world itself: generate, explore, dig, build.
-- Chunk meshes rebuild whole-chunk on edit (~1-2ms); fine in practice,
-  greedy meshing would shrink both that and draw calls further.
+- Chunk meshes rebuild whole-chunk on edit (a greedy remesh, ~1ms) rather
+  than patching just the touched faces — fine in practice, and the greedy
+  pass keeps the rebuilt buffer small.
 
 ## License
 

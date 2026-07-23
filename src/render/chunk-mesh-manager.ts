@@ -3,21 +3,15 @@ import { chunkKey } from "../world/coords";
 import type { World } from "../world/world";
 import { type MeshData, meshChunk } from "./mesher";
 
-export function createChunkMaterial(atlasTexture: THREE.Texture): THREE.Material {
-  return new THREE.MeshLambertMaterial({
-    map: atlasTexture,
-    vertexColors: true,
-    transparent: true,
-    alphaTest: 0.05,
-  });
-}
+export { createChunkMaterial } from "./chunk-material";
 
 function buildGeometry(data: MeshData): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(data.positions, 3));
   geometry.setAttribute("normal", new THREE.BufferAttribute(data.normals, 3));
   geometry.setAttribute("uv", new THREE.BufferAttribute(data.uvs, 2));
-  geometry.setAttribute("color", new THREE.BufferAttribute(data.colors, 3));
+  geometry.setAttribute("shadeColor", new THREE.BufferAttribute(data.colors, 3));
+  geometry.setAttribute("layer", new THREE.BufferAttribute(data.layers, 1));
   geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
   return geometry;
 }
@@ -49,6 +43,10 @@ export class ChunkMeshManager {
 
     const mesh = new THREE.Mesh(buildGeometry(meshData), this.material);
     mesh.position.set(chunk.worldOriginX, 0, chunk.worldOriginZ);
+    // Chunk meshes never move once placed — skip the per-frame matrix
+    // recompute Three.js would otherwise do for every one of them.
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
     this.scene.add(mesh);
     this.meshes.set(chunkKey(cx, cz), mesh);
   }

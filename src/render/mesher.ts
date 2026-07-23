@@ -1,7 +1,7 @@
 import { BlockId, isTransparent } from "../world/blocks";
 import type { Chunk } from "../world/chunk";
 import { CHUNK_HEIGHT, CHUNK_SIZE } from "../world/coords";
-import { type Face, tileForBlockFace, tileUV } from "./atlas-layout";
+import { type Face, tileForBlockFace } from "./atlas-layout";
 
 /** Anything that can answer "what block is at this world position", so the
  * mesher can look past a chunk's own edge without knowing what a World is. */
@@ -12,8 +12,12 @@ export interface NeighborLookup {
 export interface MeshData {
   positions: Float32Array;
   normals: Float32Array;
+  /** Spans 0..width / 0..height across a merged quad, so the chunk shader
+   * repeats the tile with `fract()` instead of stretching it. */
   uvs: Float32Array;
   colors: Float32Array;
+  /** Texture-array layer (a TileKind) per vertex. */
+  layers: Float32Array;
   indices: Uint32Array;
 }
 
@@ -21,16 +25,20 @@ type Axis = 0 | 1 | 2;
 
 interface FaceSpec {
   readonly face: Face;
-  readonly dir: readonly [number, number, number];
+  /** The axis the face's normal points along, and its sign. */
+  readonly dAxis: Axis;
+  readonly dirSign: 1 | -1;
   readonly normal: readonly [number, number, number];
-  /** The 4 corners of the face, CCW as seen from outside the block along `normal`. */
+  /** The 4 corners of the face, CCW as seen from outside the block along
+   * `normal`. Each component is 0 or 1; the two that vary are the tangent
+   * axes, the constant one selects the near/far plane. */
   readonly corners: readonly [
     readonly [number, number, number],
     readonly [number, number, number],
     readonly [number, number, number],
     readonly [number, number, number],
   ];
-  /** The two in-plane axes (everything except the normal's axis). */
+  /** The two in-plane axes: [width axis, height axis] for the greedy sweep. */
   readonly tangents: readonly [Axis, Axis];
   /** Directional shading: top brightest, bottom darkest, sides in between. */
   readonly shade: number;
@@ -39,7 +47,8 @@ interface FaceSpec {
 const FACES: readonly FaceSpec[] = [
   {
     face: "top",
-    dir: [0, 1, 0],
+    dAxis: 1,
+    dirSign: 1,
     normal: [0, 1, 0],
     corners: [
       [0, 1, 0],
@@ -52,7 +61,8 @@ const FACES: readonly FaceSpec[] = [
   },
   {
     face: "bottom",
-    dir: [0, -1, 0],
+    dAxis: 1,
+    dirSign: -1,
     normal: [0, -1, 0],
     corners: [
       [0, 0, 0],
@@ -65,7 +75,8 @@ const FACES: readonly FaceSpec[] = [
   },
   {
     face: "north",
-    dir: [0, 0, -1],
+    dAxis: 2,
+    dirSign: -1,
     normal: [0, 0, -1],
     corners: [
       [1, 0, 0],
@@ -78,7 +89,8 @@ const FACES: readonly FaceSpec[] = [
   },
   {
     face: "south",
-    dir: [0, 0, 1],
+    dAxis: 2,
+    dirSign: 1,
     normal: [0, 0, 1],
     corners: [
       [0, 0, 1],
@@ -91,7 +103,8 @@ const FACES: readonly FaceSpec[] = [
   },
   {
     face: "east",
-    dir: [1, 0, 0],
+    dAxis: 0,
+    dirSign: 1,
     normal: [1, 0, 0],
     corners: [
       [1, 0, 1],
@@ -104,7 +117,8 @@ const FACES: readonly FaceSpec[] = [
   },
   {
     face: "west",
-    dir: [-1, 0, 0],
+    dAxis: 0,
+    dirSign: -1,
     normal: [-1, 0, 0],
     corners: [
       [0, 0, 0],
@@ -116,6 +130,8 @@ const FACES: readonly FaceSpec[] = [
     shade: 0.85,
   },
 ];
+
+const DIMS: readonly [number, number, number] = [CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE];
 
 /** Whether a face should be emitted looking from block `self` into `neighbor`. */
 export function shouldRenderFace(self: BlockId, neighbor: BlockId): boolean {
@@ -152,97 +168,174 @@ export function quadIndexOrder(
   return [1, 2, 3, 1, 3, 0];
 }
 
-function blockAt(
+/** Reads a block by chunk-local coordinates, dropping out to the neighbor
+ * lookup (and world coordinates) past this chunk's own edges. */
+function makeLocalReader(
   chunk: Chunk,
   neighbors: NeighborLookup,
-  lx: number,
-  ly: number,
-  lz: number,
-): BlockId {
-  if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE && ly >= 0 && ly < CHUNK_HEIGHT) {
-    return chunk.getBlock(lx, ly, lz);
-  }
-  return neighbors.getBlock(chunk.worldOriginX + lx, ly, chunk.worldOriginZ + lz);
+): (lx: number, ly: number, lz: number) => BlockId {
+  return (lx, ly, lz) => {
+    if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE && ly >= 0 && ly < CHUNK_HEIGHT) {
+      return chunk.getBlock(lx, ly, lz);
+    }
+    return neighbors.getBlock(chunk.worldOriginX + lx, ly, chunk.worldOriginZ + lz);
+  };
 }
 
-/** Builds face-culled mesh data — with per-vertex ambient occlusion baked
- * into the vertex colors — for one chunk. Plain typed arrays in, plain typed
+/** Builds greedy-meshed geometry for one chunk: coplanar faces that share a
+ * tile and the exact same 4-corner ambient-occlusion pattern merge into one
+ * big quad, cutting triangle and draw-call cost. Identical AO patterns tile
+ * seamlessly, so a merged quad's linear shading reproduces the faces it
+ * replaced; faces whose AO differs (at silhouettes and terrace edges) stay
+ * separate and keep their gradient. Plain typed arrays in, plain typed
  * arrays out — no Three.js/WebGL dependency, so this runs (and is tested)
- * anywhere, including inside a Web Worker or under Node. */
+ * anywhere, including under Node. */
 export function meshChunk(chunk: Chunk, neighbors: NeighborLookup): MeshData {
+  const block = makeLocalReader(chunk, neighbors);
+  const occludes = (lx: number, ly: number, lz: number): boolean => {
+    const id = block(lx, ly, lz);
+    return id !== BlockId.AIR && id !== BlockId.WATER && id !== BlockId.LEAVES;
+  };
+
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
   const colors: number[] = [];
+  const layers: number[] = [];
   const indices: number[] = [];
 
-  const occludes = (lx: number, ly: number, lz: number): boolean => {
-    const id = blockAt(chunk, neighbors, lx, ly, lz);
-    return id !== BlockId.AIR && !isTransparent(id);
-  };
+  // Reused per (face, layer): the greedy mask over the two tangent axes.
+  const maxCells = CHUNK_HEIGHT * CHUNK_SIZE;
+  const maskKey = new Int32Array(maxCells);
+  const maskLayer = new Uint8Array(maxCells);
+  const maskAO = new Uint8Array(maxCells * 4);
 
-  for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
-    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-        const id = chunk.getBlock(lx, ly, lz);
-        if (id === BlockId.AIR) continue;
+  // Scratch for building one face's 4-corner AO.
+  const ao = [0, 0, 0, 0];
 
-        for (const spec of FACES) {
-          const neighbor = blockAt(
-            chunk,
-            neighbors,
-            lx + spec.dir[0],
-            ly + spec.dir[1],
-            lz + spec.dir[2],
-          );
-          if (!shouldRenderFace(id, neighbor)) continue;
+  for (const spec of FACES) {
+    const d = spec.dAxis;
+    const [uAxis, vAxis] = spec.tangents;
+    const s = spec.dirSign;
+    const dimD = DIMS[d];
+    const dimU = DIMS[uAxis];
+    const dimV = DIMS[vAxis];
 
-          const baseIndex = positions.length / 3;
-          const [u0, v0, u1, v1] = tileUV(tileForBlockFace(id, spec.face));
-          const faceU = [u0, u1, u1, u0] as const;
-          const faceV = [v1, v1, v0, v0] as const;
-          const [c0, c1, c2, c3] = spec.corners;
-          const cornerList = [c0, c1, c2, c3] as const;
-          const [nx, ny, nz] = spec.normal;
-          const { shade } = spec;
-          const [t1, t2] = spec.tangents;
+    const local: [number, number, number] = [0, 0, 0];
+    const open: [number, number, number] = [0, 0, 0];
 
-          // The open cell this face looks into; all AO samples live in its plane.
-          const bx = lx + spec.dir[0];
-          const by = ly + spec.dir[1];
-          const bz = lz + spec.dir[2];
+    for (let k = 0; k < dimD; k++) {
+      // --- build the mask for this layer ---
+      maskKey.fill(0, 0, dimU * dimV);
+      for (let j = 0; j < dimV; j++) {
+        for (let i = 0; i < dimU; i++) {
+          local[d] = k;
+          local[uAxis] = i;
+          local[vAxis] = j;
+          const self = block(local[0], local[1], local[2]);
+          if (self === BlockId.AIR) continue;
+          open[0] = local[0];
+          open[1] = local[1];
+          open[2] = local[2];
+          open[d] = k + s;
+          const neighbor = block(open[0], open[1], open[2]);
+          if (!shouldRenderFace(self, neighbor)) continue;
 
-          const ao: [number, number, number, number] = [3, 3, 3, 3];
+          const layer = tileForBlockFace(self, spec.face);
+
+          // Per-corner AO sampled in the open cell's plane.
           for (let c = 0; c < 4; c++) {
-            const corner = cornerList[c] ?? c0;
-            const o1 = corner[t1] === 1 ? 1 : -1;
-            const o2 = corner[t2] === 1 ? 1 : -1;
-            const s1: [number, number, number] = [bx, by, bz];
-            s1[t1] += o1;
-            const s2: [number, number, number] = [bx, by, bz];
-            s2[t2] += o2;
-            const sc: [number, number, number] = [bx, by, bz];
-            sc[t1] += o1;
-            sc[t2] += o2;
-            ao[c] = vertexAOLevel(
-              occludes(s1[0], s1[1], s1[2]),
-              occludes(s2[0], s2[1], s2[2]),
-              occludes(sc[0], sc[1], sc[2]),
+            const corner = spec.corners[c];
+            const ou = (corner ? corner[uAxis] : 0) === 1 ? 1 : -1;
+            const ov = (corner ? corner[vAxis] : 0) === 1 ? 1 : -1;
+            const s1x = open[0] + (uAxis === 0 ? ou : 0);
+            const s1y = open[1] + (uAxis === 1 ? ou : 0);
+            const s1z = open[2] + (uAxis === 2 ? ou : 0);
+            const s2x = open[0] + (vAxis === 0 ? ov : 0);
+            const s2y = open[1] + (vAxis === 1 ? ov : 0);
+            const s2z = open[2] + (vAxis === 2 ? ov : 0);
+            const scx = open[0] + (uAxis === 0 ? ou : 0) + (vAxis === 0 ? ov : 0);
+            const scy = open[1] + (uAxis === 1 ? ou : 0) + (vAxis === 1 ? ov : 0);
+            const scz = open[2] + (uAxis === 2 ? ou : 0) + (vAxis === 2 ? ov : 0);
+            const level = vertexAOLevel(
+              occludes(s1x, s1y, s1z),
+              occludes(s2x, s2y, s2z),
+              occludes(scx, scy, scz),
             );
+            ao[c] = level;
           }
 
-          for (let c = 0; c < 4; c++) {
-            const corner = cornerList[c] ?? c0;
-            positions.push(lx + corner[0], ly + corner[1], lz + corner[2]);
-            normals.push(nx, ny, nz);
-            uvs.push(faceU[c] ?? 0, faceV[c] ?? 0);
-            const brightness = shade * (AO_BRIGHTNESS[ao[c] ?? 3] ?? 1);
-            colors.push(brightness, brightness, brightness);
+          const cell = j * dimU + i;
+          const a0 = ao[0] ?? 0;
+          const a1 = ao[1] ?? 0;
+          const a2 = ao[2] ?? 0;
+          const a3 = ao[3] ?? 0;
+          maskLayer[cell] = layer;
+          maskAO[cell * 4] = a0;
+          maskAO[cell * 4 + 1] = a1;
+          maskAO[cell * 4 + 2] = a2;
+          maskAO[cell * 4 + 3] = a3;
+          // Faces merge when they share a tile AND the exact same 4-corner AO
+          // pattern — identical patterns tile seamlessly, so a merged quad's
+          // linear shading matches the faces it replaced. This captures flat
+          // fields (AO 3333) and consistent slope/edge runs alike.
+          maskKey[cell] = ((layer << 8) | (a0 << 6) | (a1 << 4) | (a2 << 2) | a3) + 1;
+        }
+      }
+
+      // --- greedily merge rectangles and emit ---
+      for (let j = 0; j < dimV; j++) {
+        for (let i = 0; i < dimU;) {
+          const cell = j * dimU + i;
+          const key = maskKey[cell] ?? 0;
+          if (key === 0) {
+            i++;
+            continue;
           }
 
-          for (const local of quadIndexOrder(ao)) {
-            indices.push(baseIndex + local);
+          // Extend width while the key matches and merging is allowed.
+          let w = 1;
+          if (key > 0) {
+            while (i + w < dimU && maskKey[cell + w] === key) w++;
           }
+          // Extend height (only whole matching rows).
+          let h = 1;
+          if (key > 0) {
+            outer: while (j + h < dimV) {
+              const rowBase = (j + h) * dimU + i;
+              for (let x = 0; x < w; x++) {
+                if (maskKey[rowBase + x] !== key) break outer;
+              }
+              h++;
+            }
+          }
+
+          emitQuad(
+            spec,
+            k,
+            i,
+            j,
+            w,
+            h,
+            maskLayer[cell] ?? 0,
+            maskAO[cell * 4] ?? 0,
+            maskAO[cell * 4 + 1] ?? 0,
+            maskAO[cell * 4 + 2] ?? 0,
+            maskAO[cell * 4 + 3] ?? 0,
+            positions,
+            normals,
+            uvs,
+            colors,
+            layers,
+            indices,
+          );
+
+          for (let dj = 0; dj < h; dj++) {
+            for (let di = 0; di < w; di++) {
+              maskKey[(j + dj) * dimU + i + di] = 0;
+            }
+          }
+          i += w;
         }
       }
     }
@@ -253,6 +346,55 @@ export function meshChunk(chunk: Chunk, neighbors: NeighborLookup): MeshData {
     normals: new Float32Array(normals),
     uvs: new Float32Array(uvs),
     colors: new Float32Array(colors),
+    layers: new Float32Array(layers),
     indices: new Uint32Array(indices),
   };
+}
+
+/** Emits one (possibly merged) quad: 4 vertices scaled to the rectangle,
+ * with the tile layer, per-corner AO-tinted directional shade, repeating
+ * UVs, and the AO-aware triangle diagonal. */
+function emitQuad(
+  spec: FaceSpec,
+  k: number,
+  i: number,
+  j: number,
+  w: number,
+  h: number,
+  layer: number,
+  ao0: number,
+  ao1: number,
+  ao2: number,
+  ao3: number,
+  positions: number[],
+  normals: number[],
+  uvs: number[],
+  colors: number[],
+  layers: number[],
+  indices: number[],
+): void {
+  const d = spec.dAxis;
+  const [uAxis, vAxis] = spec.tangents;
+  const base = positions.length / 3;
+  const [nx, ny, nz] = spec.normal;
+  const { shade } = spec;
+  const aoQuad: [number, number, number, number] = [ao0, ao1, ao2, ao3];
+
+  for (let c = 0; c < 4; c++) {
+    const corner = spec.corners[c] ?? spec.corners[0];
+    const pos: [number, number, number] = [0, 0, 0];
+    pos[d] = k + corner[d];
+    pos[uAxis] = i + corner[uAxis] * w;
+    pos[vAxis] = j + corner[vAxis] * h;
+    positions.push(pos[0], pos[1], pos[2]);
+    normals.push(nx, ny, nz);
+    uvs.push(corner[uAxis] * w, corner[vAxis] * h);
+    layers.push(layer);
+    const brightness = shade * (AO_BRIGHTNESS[aoQuad[c] ?? 3] ?? 1);
+    colors.push(brightness, brightness, brightness);
+  }
+
+  for (const localIndex of quadIndexOrder(aoQuad)) {
+    indices.push(base + localIndex);
+  }
 }

@@ -1,11 +1,12 @@
 import "./style.css";
 import * as THREE from "three";
-import { ChunkMeshManager, createChunkMaterial } from "./render/chunk-mesh-manager";
+import { ChunkMeshManager } from "./render/chunk-mesh-manager";
+import { createChunkMaterial, updateChunkMaterial } from "./render/chunk-material";
 import { Clouds } from "./render/clouds";
 import { CpuRenderer } from "./render/cpu-renderer";
 import { createGameScene } from "./render/scene";
 import { DAY_LENGTH_SECONDS, STARTUP_PHASE, skyStateAt } from "./render/sky";
-import { createTextureAtlas } from "./render/texture-atlas";
+import { createBlockTextureArray, createTextureAtlas } from "./render/texture-atlas";
 import { PlayerController } from "./player/controller";
 import { BlockInteraction } from "./player/interaction";
 import { Hotbar } from "./ui/hotbar";
@@ -22,7 +23,7 @@ import {
 import { World } from "./world/world";
 
 const DEFAULT_SEED = 2026;
-const STREAM_RADIUS_WEBGL = 7;
+const STREAM_RADIUS_WEBGL = 9; // greedy meshing makes the extra draw distance affordable
 const STREAM_RADIUS_CPU = 4; // rays reach ~52 blocks; a tighter ring is plenty
 const WARMUP_RADIUS_CHUNKS = 2;
 const MESH_BUDGET_PER_FRAME = 3;
@@ -106,6 +107,7 @@ function boot(): void {
   let cpuView: CpuRenderer | null = null;
   try {
     const gameScene = createGameScene(app);
+    const chunkMaterial = createChunkMaterial(createBlockTextureArray(SEED));
     view = {
       kind: "webgl",
       camera: gameScene.camera,
@@ -114,11 +116,14 @@ function boot(): void {
         gameScene.render();
       },
       resize: gameScene.resize,
-      applySky: gameScene.applySky,
+      applySky: (state) => {
+        gameScene.applySky(state);
+        updateChunkMaterial(chunkMaterial, state);
+      },
       tickAdaptive: gameScene.tickAdaptive,
       qualityNote: () => `${Math.round(gameScene.pixelRatio() * 100)}% scale`,
     };
-    chunkMeshes = new ChunkMeshManager(gameScene.scene, world, createChunkMaterial(atlas.texture));
+    chunkMeshes = new ChunkMeshManager(gameScene.scene, world, chunkMaterial);
     clouds = new Clouds(gameScene.scene, SEED);
     highlight = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),

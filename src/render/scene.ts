@@ -1,9 +1,9 @@
 import * as THREE from "three";
 
 export const SKY_COLOR = 0x87ceeb;
-export const FOG_NEAR = 60;
-export const FOG_FAR = 105;
-const SUN_DISTANCE = 140;
+export const FOG_NEAR = 78;
+export const FOG_FAR = 140;
+const SUN_DISTANCE = 180;
 
 export interface GameScene {
   readonly scene: THREE.Scene;
@@ -41,6 +41,7 @@ export function createGameScene(parent: HTMLElement): GameScene {
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     failIfMajorPerformanceCaveat: false,
+    powerPreference: "high-performance",
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
