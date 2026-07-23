@@ -53,8 +53,8 @@ flowchart LR
     T --> W["Web Worker<br/>chunk generation"]
     W -->|transferable buffers| ST["streamer.ts<br/>load/unload around player"]
     E[("localStorage<br/>edit overlay")] --> ST
-    ST --> M["mesher.ts<br/>greedy meshing · per-vertex AO"]
-    M --> R["Three.js scene<br/>texture-array shader<br/>day/night sky · clouds"]
+    ST --> M["Web Worker<br/>greedy meshing · per-vertex AO"]
+    M -->|transferable geometry| R["Three.js scene<br/>texture-array shader<br/>day/night sky · clouds"]
     P["player<br/>swept AABB physics<br/>DDA voxel raycast"] --> ST
     P --> R
 ```
@@ -65,9 +65,14 @@ flowchart LR
   blocks stamped from both sides without any chunk-to-chunk communication.
   That one design decision is what makes the world seamless _and_ the
   generator trivially parallelizable.
-- **Generation runs in a Web Worker.** Block buffers come back as
-  transferables (zero copy); the main thread only meshes, on a fixed
-  per-frame budget, so walking into new terrain doesn't hitch.
+- **Generation _and_ meshing run in Web Workers.** Terrain generation
+  returns block buffers as transferables; a second worker holds a resident
+  mirror of the loaded chunks and does the greedy meshing off the main
+  thread, streaming finished geometry back (also transferable, zero copy).
+  The main thread never blocks on a remesh, so the frame rate holds steady
+  while you explore or dig. Results are generation-tagged, so a mesh that
+  finishes after its chunk was re-edited or unloaded is dropped, not shown
+  stale. Without workers it falls back to synchronous meshing.
 - **The mesher greedy-meshes with real ambient occlusion.** Per-vertex AO
   (the classic "0fps" formulation, with each quad's diagonal flipped toward
   the brighter vertex pair to kill the anisotropic dark-streak artifact),
@@ -105,7 +110,9 @@ flowchart LR
   WebGL path steps its device-pixel-ratio down a ladder — so a phone GPU
   and a desktop GPU both converge on a fluid frame rate instead of a fixed
   quality that's wrong for one of them. The triangle savings from greedy
-  meshing are spent on more draw distance, not just more frames.
+  meshing are spent on more draw distance, not just more frames; index
+  buffers use 16-bit indices wherever a chunk fits under 65536 vertices
+  (nearly always, after greedy merging), halving their upload.
 - **Input-agnostic core.** Keyboard, mouse, drag-look, and the on-screen
   touch controls all feed the same controller and interaction through a
   tiny surface (`setExternalInput`, `lookBy`, `breakTargetedBlock`). Adding
