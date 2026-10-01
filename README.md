@@ -45,6 +45,12 @@ apologize — it switches to its own **CPU raycaster** and keeps playing:
 _Same world, same physics, same controls — zero GPU. This mode exists
 because a real player hit exactly that._
 
+## Running example
+
+![minecraft-clone running locally](docs/screenshots/gameplay.png)
+
+A world rendered by the running game after the production build, using the repository screenshot script. [Commands and test results](docs/verification.md).
+
 ## What's inside
 
 ```mermaid
