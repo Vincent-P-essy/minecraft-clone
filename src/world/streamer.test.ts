@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BlockId } from "./blocks";
-import { chunkKey } from "./coords";
+import { CHUNK_HEIGHT, CHUNK_SIZE, chunkKey } from "./coords";
 import { EditStore, type KeyValueStorage } from "./edit-store";
 import { type ChunkGenerator, ChunkStreamer, createSyncGenerator } from "./streamer";
 import { World } from "./world";
@@ -120,7 +120,7 @@ describe("receive", () => {
     const { world, streamer } = makeStreamer({});
     streamer.update(8, 8); // loads (0,0) synchronously
     const before = world.getChunk(0, 0);
-    streamer.receive(0, 0, new Uint8Array(16 * 96 * 16)); // stale all-air result
+    streamer.receive(0, 0, new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE)); // stale all-air result
     expect(world.getChunk(0, 0)).toBe(before);
   });
 });
@@ -145,7 +145,7 @@ describe("drainDirty", () => {
     const streamer = new ChunkStreamer(world, { radius: 2 });
     streamer.update(8, 8); // loads (0,0)
     streamer.drainDirty(100); // clear the queue
-    streamer.receive(1, 0, new Uint8Array(16 * 96 * 16)); // neighbor arrives
+    streamer.receive(1, 0, new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE)); // neighbor arrives
     const dirty = streamer.drainDirty(100).map((c) => chunkKey(c.cx, c.cz));
     expect(dirty).toContain(chunkKey(1, 0));
     expect(dirty).toContain(chunkKey(0, 0));
@@ -190,5 +190,78 @@ describe("generator throttling", () => {
     if (first) {
       expect(Math.abs(first.cx) + Math.abs(first.cz)).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("meshWhenSurrounded", () => {
+  function surroundedStreamer(): { world: World; streamer: ChunkStreamer } {
+    const world = new World(SEED);
+    const streamer = new ChunkStreamer(world, { radius: 3, meshWhenSurrounded: true });
+    return { world, streamer };
+  }
+  const blank = (): Uint8Array => new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
+
+  it("holds a chunk back until all eight neighbors are loaded", () => {
+    const { streamer } = surroundedStreamer();
+    for (let cx = -1; cx <= 1; cx++) {
+      for (let cz = -1; cz <= 1; cz++) {
+        if (cx === 1 && cz === 1) continue; // one corner still missing
+        streamer.receive(cx, cz, blank());
+      }
+    }
+    expect(streamer.isSurrounded(0, 0)).toBe(false);
+    expect(streamer.drainDirty(100)).toHaveLength(0);
+
+    streamer.receive(1, 1, blank());
+    expect(streamer.isSurrounded(0, 0)).toBe(true);
+    expect(streamer.drainDirty(100)).toEqual([{ cx: 0, cz: 0 }]);
+  });
+
+  it("queues each interior chunk exactly once as a block of chunks fills in", () => {
+    const { streamer } = surroundedStreamer();
+    for (let cx = -2; cx <= 2; cx++) {
+      for (let cz = -2; cz <= 2; cz++) streamer.receive(cx, cz, blank());
+    }
+    const keys = streamer.drainDirty(100).map((c) => chunkKey(c.cx, c.cz));
+    // The 3x3 interior of the 5x5 block is surrounded; the outer ring isn't.
+    expect(keys).toHaveLength(9);
+    expect(new Set(keys).size).toBe(9);
+    expect(keys).not.toContain(chunkKey(2, 2));
+  });
+});
+
+describe("disc-shaped loading", () => {
+  it("loads fewer chunks than a square of the same radius, and nothing beyond it", () => {
+    const world = new World(SEED);
+    const streamer = new ChunkStreamer(world, { radius: 4, shape: "disc" });
+    streamer.attachGenerator(
+      createSyncGenerator(SEED, (cx, cz, buffer) => {
+        streamer.receive(cx, cz, buffer);
+      }),
+    );
+    for (let i = 0; i < 40; i++) streamer.update(8, 8);
+    expect(world.loadedChunkCount).toBeLessThan(9 * 9);
+    expect(world.loadedChunkCount).toBeGreaterThan(40);
+    for (const { cx, cz } of world.loadedChunkCoords()) {
+      expect(cx * cx + cz * cz).toBeLessThanOrEqual(4.5 * 4.5);
+    }
+    expect(world.hasChunk(4, 0)).toBe(true);
+    expect(world.hasChunk(4, 4)).toBe(false);
+  });
+
+  it("setRadius shrinks the loaded set on the next update", () => {
+    const world = new World(SEED);
+    const streamer = new ChunkStreamer(world, { radius: 3 });
+    streamer.attachGenerator(
+      createSyncGenerator(SEED, (cx, cz, buffer) => {
+        streamer.receive(cx, cz, buffer);
+      }),
+    );
+    for (let i = 0; i < 20; i++) streamer.update(8, 8);
+    expect(world.hasChunk(3, 3)).toBe(true);
+    streamer.setRadius(1);
+    streamer.update(8, 8);
+    expect(world.hasChunk(3, 3)).toBe(false);
+    expect(world.hasChunk(1, 1)).toBe(true);
   });
 });

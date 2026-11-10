@@ -8,7 +8,14 @@ import {
   treeCandidateInCell,
   treeCandidatesNear,
 } from "./features";
-import { createCaveSampler, createColumnSampler, generateChunk, SEA_LEVEL } from "./terrain";
+import {
+  createCaveSampler,
+  createColumnSampler,
+  generateChunk,
+  surfaceBlock,
+  treeSpeciesAt,
+  trunkBlockFor,
+} from "./terrain";
 
 describe("treeCandidateInCell", () => {
   it("is deterministic per (seed, cell)", () => {
@@ -116,93 +123,112 @@ describe("treeBlocks", () => {
   });
 });
 
-describe("trees stamped into generated chunks", () => {
-  const seed = 2026;
+describe("treeBlocks species", () => {
+  const tree = { x: 0, z: 0, trunkHeight: 5, roll: 0.2, variant: 0.4 };
 
-  function findLandTree(): { x: number; z: number; trunkHeight: number } {
-    const sample = createColumnSampler(seed);
-    const isCave = createCaveSampler(seed);
-    for (let cx = -30; cx <= 30; cx++) {
-      for (let cz = -30; cz <= 30; cz++) {
-        const tree = treeCandidateInCell(seed, cx, cz);
-        if (!tree) continue;
-        const profile = sample(tree.x, tree.z);
-        if (
-          !profile.isDesert &&
-          !profile.isSnowy &&
-          profile.terrainHeight > SEA_LEVEL + 1 &&
-          !isCave(tree.x, profile.terrainHeight, tree.z)
-        ) {
-          return tree;
-        }
+  it("every species stays within CANOPY_RADIUS and never puts a leaf in its own trunk", () => {
+    for (const species of ["oak", "great-oak", "pale", "pine", "cactus"] as const) {
+      const blocks = treeBlocks(tree, 50, species);
+      const trunk = new Set(
+        blocks.filter((b) => b.kind === "trunk").map((b) => `${b.x},${b.y},${b.z}`),
+      );
+      expect(trunk.size).toBeGreaterThan(0);
+      for (const b of blocks) {
+        expect(Math.abs(b.x)).toBeLessThanOrEqual(CANOPY_RADIUS);
+        expect(Math.abs(b.z)).toBeLessThanOrEqual(CANOPY_RADIUS);
+        expect(b.y).toBeGreaterThan(50);
+        if (b.kind === "leaves") expect(trunk.has(`${b.x},${b.y},${b.z}`)).toBe(false);
       }
     }
-    throw new Error("no eligible tree found in the scanned area for this seed");
+  });
+
+  it("a cactus is a bare column", () => {
+    const blocks = treeBlocks(tree, 50, "cactus");
+    expect(blocks.every((b) => b.kind === "trunk" && b.x === 0 && b.z === 0)).toBe(true);
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    expect(blocks.length).toBeLessThanOrEqual(4);
+  });
+
+  it("a pine is taller than an oak grown from the same candidate", () => {
+    const top = (species: "oak" | "pine"): number =>
+      Math.max(...treeBlocks(tree, 50, species).map((b) => b.y));
+    expect(top("pine")).toBeGreaterThan(top("oak"));
+  });
+
+  it("is deterministic", () => {
+    expect(treeBlocks(tree, 50, "great-oak")).toEqual(treeBlocks(tree, 50, "great-oak"));
+  });
+});
+
+describe("trees stamped into generated chunks", () => {
+  const seed = 2026;
+  const sample = createColumnSampler(seed);
+  const isCave = createCaveSampler(seed);
+
+  /** Mirrors the generator's own eligibility rules. */
+  function speciesIfGrown(tree: NonNullable<ReturnType<typeof treeCandidateInCell>>) {
+    const profile = sample(tree.x, tree.z);
+    const species = treeSpeciesAt(profile, tree);
+    if (!species) return null;
+    if (isCave(tree.x, profile.terrainHeight, tree.z)) return null;
+    const ground = surfaceBlock(profile);
+    if (species === "cactus" ? ground !== BlockId.SAND : ground === BlockId.STONE) return null;
+    return { species, profile };
   }
 
   it("an eligible tree's trunk appears in the generated chunk that contains it", () => {
-    const tree = findLandTree();
-    const sample = createColumnSampler(seed);
-    const surfaceY = sample(tree.x, tree.z).terrainHeight;
-    const chunk = generateChunk(worldToChunk(tree.x), worldToChunk(tree.z), seed);
-    expect(chunk.getBlock(worldToLocal(tree.x), surfaceY + 1, worldToLocal(tree.z))).toBe(
-      BlockId.WOOD,
-    );
-  });
-
-  it("adjacent chunks agree block-for-block along their shared border (canopy seams)", () => {
-    // The real cross-chunk property: for a border column, both chunks derive
-    // any overhanging canopy from the same pure functions. Compare a full
-    // border column of chunk (0,0) with the matching column of chunk (1,0):
-    // they're different world columns, so instead compare each chunk's edge
-    // against a freshly generated copy of the SAME chunk reached from the
-    // other side — plus spot-check that leaves appearing at x=15 of one
-    // chunk imply the tree source exists for both.
-    const a1 = generateChunk(0, 0, seed);
-    const a2 = generateChunk(0, 0, seed);
-    expect(a1.buffer).toEqual(a2.buffer);
-
-    // Stronger: find a tree whose canopy provably straddles a chunk border,
-    // then check the neighbor chunk carries the overhanging leaves.
-    const sample = createColumnSampler(seed);
-    const isCave = createCaveSampler(seed);
-    let checked = false;
-    outer: for (let cx = -40; cx <= 40; cx++) {
-      for (let cz = -40; cz <= 40; cz++) {
+    let checked = 0;
+    for (let cx = -60; cx <= 60 && checked < 12; cx++) {
+      for (let cz = -60; cz <= 60 && checked < 12; cz += 7) {
         const tree = treeCandidateInCell(seed, cx, cz);
         if (!tree) continue;
-        const profile = sample(tree.x, tree.z);
-        const eligible =
-          !profile.isDesert &&
-          !profile.isSnowy &&
-          profile.terrainHeight > SEA_LEVEL + 1 &&
-          !isCave(tree.x, profile.terrainHeight, tree.z);
-        if (!eligible) continue;
+        const grown = speciesIfGrown(tree);
+        if (!grown) continue;
+        const chunk = generateChunk(worldToChunk(tree.x), worldToChunk(tree.z), seed);
+        expect(
+          chunk.getBlock(
+            worldToLocal(tree.x),
+            grown.profile.terrainHeight + 1,
+            worldToLocal(tree.z),
+          ),
+        ).toBe(trunkBlockFor(grown.species));
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("regenerating a chunk gives identical blocks", () => {
+    expect(generateChunk(0, 0, seed).buffer).toEqual(generateChunk(0, 0, seed).buffer);
+  });
+
+  it("a canopy that straddles a chunk border is carried by the neighboring chunk", () => {
+    // Find an oak whose trunk hugs a chunk border, then check the neighbor
+    // chunk holds the overhanging leaves: both chunks derive the canopy
+    // from the same pure functions, with no chunk-to-chunk communication.
+    let checked = false;
+    outer: for (let cx = -80; cx <= 80; cx++) {
+      for (let cz = -80; cz <= 80; cz++) {
+        const tree = treeCandidateInCell(seed, cx, cz);
+        if (!tree) continue;
+        const grown = speciesIfGrown(tree);
+        if (grown?.species !== "oak") continue;
         const lx = worldToLocal(tree.x);
-        if (lx !== 0 && lx !== CHUNK_SIZE - 1) continue; // want a trunk hugging a border
+        if (lx !== 0 && lx !== CHUNK_SIZE - 1) continue;
 
         const neighborCx = worldToChunk(tree.x) + (lx === 0 ? -1 : 1);
         const neighborChunk = generateChunk(neighborCx, worldToChunk(tree.z), seed);
-        const canopyY = profile.terrainHeight + tree.trunkHeight - 1;
+        const canopyY = grown.profile.terrainHeight + tree.trunkHeight - 1;
         const overhangX = lx === 0 ? tree.x - 1 : tree.x + 1;
         const block = neighborChunk.getBlock(
           worldToLocal(overhangX),
           canopyY,
           worldToLocal(tree.z),
         );
-        // The overhanging cell must carry the tree unless something else
-        // legitimately occupies it (terrain rising into the canopy, or
-        // another tree's trunk).
-        expect([
-          BlockId.LEAVES,
-          BlockId.WOOD,
-          BlockId.DIRT,
-          BlockId.STONE,
-          BlockId.GRASS,
-          BlockId.SNOW,
-          BlockId.SAND,
-        ]).toContain(block);
+        // The overhanging cell carries the canopy unless something solid
+        // legitimately occupies it (terrain rising into it, another trunk).
         expect(block).not.toBe(BlockId.AIR);
+        expect(block).not.toBe(BlockId.TALL_GRASS);
         checked = true;
         break outer;
       }

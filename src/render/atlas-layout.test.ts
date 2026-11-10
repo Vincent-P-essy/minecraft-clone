@@ -3,6 +3,8 @@ import { BlockId } from "../world/blocks";
 import {
   ALL_TILE_KINDS,
   ATLAS_GRID_SIZE,
+  FACE_ORDER,
+  TILE_TABLE,
   TileKind,
   tileForBlockFace,
   tileGridPosition,
@@ -15,11 +17,21 @@ describe("tileGridPosition", () => {
   });
 
   it("wraps to the next row after ATLAS_GRID_SIZE tiles", () => {
-    // With a 4-wide grid, tile index 4 (SAND) is the first tile of row 1,
-    // and tile index 5 (WATER) is the second.
-    expect(TileKind.SAND).toBe(ATLAS_GRID_SIZE);
-    expect(tileGridPosition(TileKind.SAND)).toEqual({ col: 0, row: 1 });
-    expect(tileGridPosition(TileKind.WATER)).toEqual({ col: 1, row: 1 });
+    const firstOfRowOne = ALL_TILE_KINDS[ATLAS_GRID_SIZE];
+    const secondOfRowOne = ALL_TILE_KINDS[ATLAS_GRID_SIZE + 1];
+    if (firstOfRowOne === undefined || secondOfRowOne === undefined) {
+      throw new Error("the atlas should hold more than one row of tiles");
+    }
+    expect(tileGridPosition(firstOfRowOne)).toEqual({ col: 0, row: 1 });
+    expect(tileGridPosition(secondOfRowOne)).toEqual({ col: 1, row: 1 });
+  });
+
+  it("fits every tile inside the grid", () => {
+    for (const tile of ALL_TILE_KINDS) {
+      const { col, row } = tileGridPosition(tile);
+      expect(col).toBeLessThan(ATLAS_GRID_SIZE);
+      expect(row).toBeLessThan(ATLAS_GRID_SIZE);
+    }
   });
 });
 
@@ -79,6 +91,14 @@ describe("tileForBlockFace", () => {
       tileForBlockFace(BlockId.STONE, f),
     );
     expect(new Set(faces).size).toBe(1);
+  });
+
+  it("the mesher's flat table agrees with tileForBlockFace for every block and face", () => {
+    for (const id of Object.values(BlockId)) {
+      FACE_ORDER.forEach((face, f) => {
+        expect(TILE_TABLE[id * 6 + f]).toBe(tileForBlockFace(id, face));
+      });
+    }
   });
 
   it("gives every non-air BlockId some tile without throwing", () => {

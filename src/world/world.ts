@@ -24,6 +24,11 @@ export class World implements NeighborLookup {
     return this.chunks.get(chunkKey(cx, cz));
   }
 
+  /** Raw block buffer of a loaded chunk — the mesher's fast path. */
+  getChunkBuffer(cx: number, cz: number): Uint8Array | undefined {
+    return this.chunks.get(chunkKey(cx, cz))?.buffer;
+  }
+
   setChunk(chunk: Chunk): void {
     this.chunks.set(chunkKey(chunk.cx, chunk.cz), chunk);
   }

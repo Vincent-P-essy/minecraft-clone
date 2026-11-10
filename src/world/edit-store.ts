@@ -28,7 +28,7 @@ export class EditStore {
   }
 
   static storageKey(seed: number): string {
-    return `minecraft-clone:edits:${seed.toString()}`;
+    return `voxel-world:edits:v2:${seed.toString()}`;
   }
 
   record(worldX: number, worldY: number, worldZ: number, id: BlockId): void {

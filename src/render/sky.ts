@@ -2,7 +2,7 @@
  * here, so the whole cycle (colors, intensities, sun arc) is unit-testable.
  * The scene just applies whatever this returns each frame. */
 
-export const DAY_LENGTH_SECONDS = 240;
+export const DAY_LENGTH_SECONDS = 720;
 
 /** The game starts partway into the morning rather than at the sunrise
  * keyframe, so first load shows the world in full daylight. */

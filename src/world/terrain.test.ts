@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { BlockId } from "./blocks";
+import type { Chunk } from "./chunk";
 import { CHUNK_HEIGHT, CHUNK_SIZE } from "./coords";
 import {
+  Biome,
+  type ColumnProfile,
   createCaveSampler,
   createColumnSampler,
-  DIRT_DEPTH,
   generateChunk,
+  hash3,
   SEA_LEVEL,
+  surfaceBlock,
 } from "./terrain";
 
 describe("createColumnSampler", () => {
@@ -82,91 +86,185 @@ describe("generateChunk determinism", () => {
   });
 });
 
+const PLANTS: readonly BlockId[] = [
+  BlockId.TALL_GRASS,
+  BlockId.FLOWER_RED,
+  BlockId.FLOWER_YELLOW,
+  BlockId.FLOWER_BLUE,
+  BlockId.DRY_BUSH,
+];
+const TREE_BLOCKS: readonly BlockId[] = [
+  BlockId.WOOD,
+  BlockId.LEAVES,
+  BlockId.PALE_WOOD,
+  BlockId.AUTUMN_LEAVES,
+  BlockId.PINE_WOOD,
+  BlockId.PINE_LEAVES,
+  BlockId.CACTUS,
+];
+const LEAVES: readonly BlockId[] = [BlockId.LEAVES, BlockId.AUTUMN_LEAVES, BlockId.PINE_LEAVES];
+const UNDERGROUND: readonly BlockId[] = [
+  BlockId.STONE,
+  BlockId.DIRT,
+  BlockId.SAND,
+  BlockId.SANDSTONE,
+  BlockId.SNOW,
+  BlockId.COAL_ORE,
+  BlockId.GOLD_ORE,
+  BlockId.CRYSTAL,
+];
+
 describe("generateChunk layering", () => {
   const seed = 2026;
-  const chunk = generateChunk(2, -1, seed);
   const sampleColumn = createColumnSampler(seed);
   const isCave = createCaveSampler(seed);
-  const worldX = (lx: number): number => 2 * CHUNK_SIZE + lx;
-  const worldZ = (lz: number): number => -1 * CHUNK_SIZE + lz;
+  // A spread of chunks so the invariants meet several biomes, not one.
+  const coords: readonly (readonly [number, number])[] = [
+    [2, -1],
+    [0, 0],
+    [-11, 7],
+    [25, 14],
+    [-40, -33],
+  ];
+  const chunks = coords.map(([cx, cz]) => ({ cx, cz, chunk: generateChunk(cx, cz, seed) }));
 
-  it("has bedrock at the very bottom of every column — caves never breach it", () => {
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        expect(chunk.getBlock(lx, 0, lz)).toBe(BlockId.BEDROCK);
+  function eachColumn(
+    visit: (
+      chunk: Chunk,
+      lx: number,
+      lz: number,
+      worldX: number,
+      worldZ: number,
+      profile: ColumnProfile,
+    ) => void,
+  ): void {
+    for (const { cx, cz, chunk } of chunks) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          const worldX = cx * CHUNK_SIZE + lx;
+          const worldZ = cz * CHUNK_SIZE + lz;
+          visit(chunk, lx, lz, worldX, worldZ, sampleColumn(worldX, worldZ));
+        }
       }
     }
+  }
+
+  it("has bedrock at the very bottom of every column — caves never breach it", () => {
+    eachColumn((chunk, lx, lz) => {
+      expect(chunk.getBlock(lx, 0, lz)).toBe(BlockId.BEDROCK);
+    });
   });
 
   it("matches the biome surface block wherever no cave carved the surface away", () => {
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const profile = sampleColumn(worldX(lx), worldZ(lz));
-        const surface = chunk.getBlock(lx, profile.terrainHeight, lz);
+    eachColumn((chunk, lx, lz, worldX, worldZ, profile) => {
+      const h = profile.terrainHeight;
+      const surface = chunk.getBlock(lx, h, lz);
+      const nearWater = h <= SEA_LEVEL + 2;
+      if (!nearWater && isCave(worldX, h, worldZ)) {
+        // A natural cave mouth (a canopy may still overhang it).
+        expect([BlockId.AIR, ...LEAVES]).toContain(surface);
+      } else {
+        expect(surface).toBe(surfaceBlock(profile));
+      }
+    });
+  });
 
-        if (
-          isCave(worldX(lx), profile.terrainHeight, worldZ(lz)) &&
-          profile.terrainHeight > SEA_LEVEL
-        ) {
-          expect(surface).toBe(BlockId.AIR); // a natural cave mouth
-        } else if (profile.terrainHeight <= SEA_LEVEL) {
-          expect(surface).toBe(BlockId.SAND);
-        } else if (profile.isSnowy) {
-          expect(surface).toBe(BlockId.SNOW);
-        } else if (profile.isDesert) {
-          expect(surface).toBe(BlockId.SAND);
+  it("keeps the water's bed watertight: columns at or below the shore are never carved near the top", () => {
+    eachColumn((chunk, lx, lz, _x, _z, profile) => {
+      if (profile.terrainHeight > SEA_LEVEL + 2) return;
+      for (let y = Math.max(1, profile.terrainHeight - 3); y <= profile.terrainHeight; y++) {
+        expect(chunk.getBlock(lx, y, lz)).not.toBe(BlockId.AIR);
+      }
+    });
+  });
+
+  it("below the surface: natural rock, soil and ore where uncarved, open cave where carved", () => {
+    eachColumn((chunk, lx, lz, worldX, worldZ, profile) => {
+      if (lx % 3 !== 0 || lz % 3 !== 0) return;
+      const h = profile.terrainHeight;
+      const carveCeiling = h <= SEA_LEVEL + 2 ? h - 4 : h;
+      for (let y = 1; y < h; y++) {
+        const block = chunk.getBlock(lx, y, lz);
+        if (y <= carveCeiling && isCave(worldX, y, worldZ)) {
+          expect([BlockId.AIR, BlockId.GLOWSHROOM]).toContain(block);
         } else {
-          expect(surface).toBe(BlockId.GRASS);
+          expect(UNDERGROUND).toContain(block);
         }
+      }
+    });
+  });
+
+  it("only stone hosts ore, and gold stays deep", () => {
+    eachColumn((chunk, lx, lz, _x, _z, profile) => {
+      for (let y = 1; y < profile.terrainHeight; y++) {
+        const block = chunk.getBlock(lx, y, lz);
+        if (block === BlockId.GOLD_ORE) expect(y).toBeLessThan(34);
+        if (block === BlockId.CRYSTAL) expect(y).toBeLessThan(SEA_LEVEL - 4);
+      }
+    });
+  });
+
+  it("above the terrain: water (or ice) up to sea level, otherwise only air, plants or trees", () => {
+    eachColumn((chunk, lx, lz, _x, _z, profile) => {
+      for (let y = profile.terrainHeight + 1; y < CHUNK_HEIGHT; y++) {
+        const block = chunk.getBlock(lx, y, lz);
+        if (y <= SEA_LEVEL) {
+          const expected = y === SEA_LEVEL && profile.frozen ? BlockId.ICE : BlockId.WATER;
+          expect(block).toBe(expected);
+        } else {
+          expect([BlockId.AIR, ...PLANTS, ...TREE_BLOCKS]).toContain(block);
+        }
+      }
+    });
+  });
+
+  it("plants only ever sit directly on the surface block", () => {
+    eachColumn((chunk, lx, lz, _x, _z, profile) => {
+      for (let y = 1; y < CHUNK_HEIGHT; y++) {
+        const block = chunk.getBlock(lx, y, lz);
+        if (PLANTS.includes(block)) expect(y).toBe(profile.terrainHeight + 1);
+      }
+    });
+  });
+});
+
+describe("biomes", () => {
+  it("a large area holds a real variety of biomes, with both land and sea", () => {
+    const sample = createColumnSampler(2026);
+    const seen = new Set<number>();
+    for (let x = -3000; x <= 3000; x += 60) {
+      for (let z = -3000; z <= 3000; z += 60) seen.add(sample(x, z).biome);
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(8);
+    expect(seen.has(Biome.OCEAN)).toBe(true);
+    expect(seen.has(Biome.FOREST)).toBe(true);
+  });
+
+  it("snowy and desert flags follow the biome", () => {
+    const sample = createColumnSampler(7);
+    for (let x = -2000; x <= 2000; x += 97) {
+      for (let z = -2000; z <= 2000; z += 97) {
+        const p = sample(x, z);
+        expect(p.isDesert).toBe(p.biome === Biome.DESERT);
+        expect(p.isSnowy).toBe(p.biome === Biome.TUNDRA || p.biome === Biome.SNOW_PEAK);
+        if (p.biome === Biome.OCEAN) expect(p.terrainHeight).toBeLessThanOrEqual(SEA_LEVEL);
+        else expect(p.terrainHeight).toBeGreaterThan(SEA_LEVEL);
       }
     }
   });
+});
 
-  it("keeps the seabed watertight: underwater columns are never carved near the floor", () => {
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const profile = sampleColumn(worldX(lx), worldZ(lz));
-        if (profile.terrainHeight > SEA_LEVEL) continue;
-        for (let y = Math.max(1, profile.terrainHeight - 3); y <= profile.terrainHeight; y++) {
-          expect(chunk.getBlock(lx, y, lz)).not.toBe(BlockId.AIR);
-        }
-      }
+describe("hash3", () => {
+  it("is deterministic and spreads over the full 32-bit range", () => {
+    expect(hash3(1, 2, 3, 4)).toBe(hash3(1, 2, 3, 4));
+    let high = 0;
+    for (let i = 0; i < 2000; i++) {
+      const h = hash3(99, i, i * 7, -i);
+      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeLessThanOrEqual(0xffffffff);
+      if (h > 0x7fffffff) high++;
     }
-  });
-
-  it("subsurface cells are stone/dirt/sand where uncarved, air where carved", () => {
-    for (let lx = 0; lx < CHUNK_SIZE; lx += 3) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz += 3) {
-        const profile = sampleColumn(worldX(lx), worldZ(lz));
-        const underwater = profile.terrainHeight <= SEA_LEVEL;
-        const carveCeiling = underwater ? profile.terrainHeight - 4 : profile.terrainHeight;
-        for (let y = 1; y < profile.terrainHeight; y++) {
-          const block = chunk.getBlock(lx, y, lz);
-          if (y <= carveCeiling && isCave(worldX(lx), y, worldZ(lz))) {
-            expect(block).toBe(BlockId.AIR);
-          } else if (y < profile.terrainHeight - DIRT_DEPTH) {
-            expect(block).toBe(BlockId.STONE);
-          } else {
-            expect([BlockId.DIRT, BlockId.SAND]).toContain(block);
-          }
-        }
-      }
-    }
-  });
-
-  it("above the terrain: water up to sea level, otherwise only air or tree blocks", () => {
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const profile = sampleColumn(worldX(lx), worldZ(lz));
-        for (let y = profile.terrainHeight + 1; y < CHUNK_HEIGHT; y++) {
-          const block = chunk.getBlock(lx, y, lz);
-          if (y <= SEA_LEVEL) {
-            expect(block).toBe(BlockId.WATER);
-          } else {
-            expect([BlockId.AIR, BlockId.WOOD, BlockId.LEAVES]).toContain(block);
-          }
-        }
-      }
-    }
+    expect(high).toBeGreaterThan(800);
+    expect(high).toBeLessThan(1200);
   });
 });

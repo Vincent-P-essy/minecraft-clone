@@ -230,6 +230,51 @@ export function stepPhysics(
   return result;
 }
 
+export const FLY_SPEED = 11;
+export const FLY_SPRINT_MULTIPLIER = 2.4;
+
+export interface FlightInput {
+  readonly forward: number;
+  readonly right: number;
+  /** -1..1, positive = ascend. */
+  readonly up: number;
+  readonly yaw: number;
+  readonly sprint?: boolean;
+}
+
+/** Creative flight: no gravity, direct control on all three axes, still
+ * colliding with the world. Velocity eases toward the input so starts and
+ * stops glide instead of snapping. */
+export function stepFlight(
+  state: PlayerPhysicsState,
+  input: FlightInput,
+  dt: number,
+  isSolid: SolidQuery,
+): PlayerPhysicsState {
+  const fwd = forwardVector(input.yaw);
+  const right = rightVector(input.yaw);
+  let ix = fwd.x * input.forward + right.x * input.right;
+  let iz = fwd.z * input.forward + right.z * input.right;
+  const inputLength = Math.hypot(ix, iz);
+  if (inputLength > 1) {
+    ix /= inputLength;
+    iz /= inputLength;
+  }
+  const speed = FLY_SPEED * (input.sprint ? FLY_SPRINT_MULTIPLIER : 1);
+  const ease = 1 - Math.exp(-dt * 9);
+  const vx = state.velocity.x + (ix * speed - state.velocity.x) * ease;
+  const vy = state.velocity.y + (input.up * speed * 0.8 - state.velocity.y) * ease;
+  const vz = state.velocity.z + (iz * speed - state.velocity.z) * ease;
+  return moveAndCollide(
+    state.position,
+    { x: vx, y: vy, z: vz },
+    vx * dt,
+    vy * dt,
+    vz * dt,
+    isSolid,
+  );
+}
+
 /** Highest non-solid Y at (x, z), scanning down from `fromY`, for spawning
  * or teleporting somewhere that won't immediately collide. */
 export function findGroundHeight(x: number, z: number, fromY: number, isSolid: SolidQuery): number {

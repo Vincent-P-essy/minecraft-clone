@@ -5,31 +5,53 @@ import { meshChunk, type NeighborLookup } from "./mesher";
 
 /** Meshes chunks off the main thread. It keeps a resident cache of block
  * buffers (mirroring the loaded world) so it can read across chunk borders
- * for face culling and ambient occlusion without the main thread shipping
- * neighbor data on every request. The expensive greedy meshing runs here;
- * only the finished geometry (typed arrays, transferred) crosses back. */
+ * for face culling, ambient occlusion and light without the main thread
+ * shipping neighbor data on every request. The expensive part — solving
+ * light over a 3x3 chunk neighborhood, then greedy meshing — runs here;
+ * only the finished packed geometry (transferred, not copied) crosses
+ * back. Several of these run side by side as a pool. */
 
-interface SetMessage {
+export interface SetMessage {
   type: "set";
   cx: number;
   cz: number;
   buffer: Uint8Array;
 }
-interface RemoveMessage {
+export interface EditMessage {
+  type: "edit";
+  cx: number;
+  cz: number;
+  index: number;
+  id: number;
+}
+export interface RemoveMessage {
   type: "remove";
   cx: number;
   cz: number;
 }
-interface MeshMessage {
+export interface MeshMessage {
   type: "mesh";
   cx: number;
   cz: number;
   id: number;
 }
-type InMessage = SetMessage | RemoveMessage | MeshMessage;
+export type MeshWorkerRequest = SetMessage | EditMessage | RemoveMessage | MeshMessage;
+
+export interface MeshWorkerResult {
+  type: "mesh";
+  cx: number;
+  cz: number;
+  id: number;
+  empty: boolean;
+  opaque: Uint32Array;
+  caveStart: number;
+  water: Uint32Array;
+  minY: number;
+  maxY: number;
+}
 
 interface WorkerScope {
-  onmessage: ((event: MessageEvent<InMessage>) => void) | null;
+  onmessage: ((event: MessageEvent<MeshWorkerRequest>) => void) | null;
   postMessage(message: unknown, transfer?: Transferable[]): void;
 }
 
@@ -45,7 +67,10 @@ const neighbors: NeighborLookup = {
     if (!buf) return BlockId.AIR;
     const lx = ((worldX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const lz = ((worldZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    return (buf[((worldY << 4) | lz) * CHUNK_SIZE + lx] ?? BlockId.AIR) as BlockId;
+    return (buf[(worldY * CHUNK_SIZE + lz) * CHUNK_SIZE + lx] ?? BlockId.AIR) as BlockId;
+  },
+  getChunkBuffer(cx, cz) {
+    return buffers.get(chunkKey(cx, cz));
   },
 };
 
@@ -55,36 +80,44 @@ scope.onmessage = (event) => {
     buffers.set(chunkKey(m.cx, m.cz), m.buffer);
     return;
   }
+  if (m.type === "edit") {
+    const buffer = buffers.get(chunkKey(m.cx, m.cz));
+    if (buffer) buffer[m.index] = m.id;
+    return;
+  }
   if (m.type === "remove") {
     buffers.delete(chunkKey(m.cx, m.cz));
     return;
   }
   const buffer = buffers.get(chunkKey(m.cx, m.cz));
   if (!buffer) {
-    scope.postMessage({ type: "mesh", cx: m.cx, cz: m.cz, id: m.id, empty: true });
-    return;
-  }
-  const data = meshChunk(new Chunk(m.cx, m.cz, buffer), neighbors);
-  scope.postMessage(
-    {
+    const none: MeshWorkerResult = {
       type: "mesh",
       cx: m.cx,
       cz: m.cz,
       id: m.id,
-      positions: data.positions,
-      normals: data.normals,
-      uvs: data.uvs,
-      colors: data.colors,
-      layers: data.layers,
-      indices: data.indices,
-    },
-    [
-      data.positions.buffer,
-      data.normals.buffer,
-      data.uvs.buffer,
-      data.colors.buffer,
-      data.layers.buffer,
-      data.indices.buffer,
-    ],
-  );
+      empty: true,
+      opaque: new Uint32Array(0),
+      caveStart: 0,
+      water: new Uint32Array(0),
+      minY: 0,
+      maxY: 0,
+    };
+    scope.postMessage(none);
+    return;
+  }
+  const data = meshChunk(new Chunk(m.cx, m.cz, buffer), neighbors);
+  const result: MeshWorkerResult = {
+    type: "mesh",
+    cx: m.cx,
+    cz: m.cz,
+    id: m.id,
+    empty: data.opaque.length === 0 && data.water.length === 0,
+    opaque: data.opaque,
+    caveStart: data.caveStart,
+    water: data.water,
+    minY: data.minY,
+    maxY: data.maxY,
+  };
+  scope.postMessage(result, [data.opaque.buffer, data.water.buffer]);
 };

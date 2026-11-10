@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createNoise2D } from "simplex-noise";
-import { BlockId } from "../world/blocks";
+import { AO_OCCLUDER, BLOCKS, BlockId } from "../world/blocks";
 import { CHUNK_HEIGHT } from "../world/coords";
 import { deriveSeed, mulberry32 } from "../world/rng";
 import type { World } from "../world/world";
@@ -59,6 +59,15 @@ const TEXEL_GRID = 8;
  * the camera — comfortably past MAX_DISTANCE in every direction. */
 const TABLE_SPAN = 11;
 const TABLE_REACH = 5;
+
+/** Blocks a CPU ray passes straight through: plants and glass have no
+ * cube to hit at this fidelity. */
+const SEE_THROUGH = new Uint8Array(256);
+const LEAFY = new Uint8Array(256);
+for (const def of Object.values(BLOCKS)) {
+  if (def.shape === "cross" || def.id === BlockId.GLASS) SEE_THROUGH[def.id] = 1;
+  if (def.sway === "leaves") LEAFY[def.id] = 1;
+}
 
 export interface CpuSkyState {
   readonly skyColor: readonly [number, number, number];
@@ -250,7 +259,7 @@ export class CpuRenderer {
     };
     const occludes = (x: number, y: number, z: number): boolean => {
       const id = sampleBlock(x, y, z);
-      return id !== BlockId.AIR && id !== BlockId.WATER && id !== BlockId.LEAVES;
+      return AO_OCCLUDER[id] === 1 && !LEAFY[id];
     };
 
     // Day/night: block colors dim with the sun, sky comes pre-keyframed.
@@ -368,7 +377,7 @@ export class CpuRenderer {
           }
         }
 
-        if (id === BlockId.AIR) continue;
+        if (id === BlockId.AIR || SEE_THROUGH[id] === 1) continue;
         if (id === BlockId.WATER) {
           if (waterT < 0) waterT = t; // remember the surface, keep going
           continue;

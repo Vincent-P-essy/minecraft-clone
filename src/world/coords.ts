@@ -1,5 +1,5 @@
 export const CHUNK_SIZE = 16;
-export const CHUNK_HEIGHT = 96;
+export const CHUNK_HEIGHT = 128;
 
 /** Which chunk a world coordinate falls in. Floor division, correct for negative inputs. */
 export function worldToChunk(worldCoord: number): number {

@@ -1,7 +1,7 @@
 import { BlockId } from "./blocks";
 import { CHUNK_HEIGHT, CHUNK_SIZE } from "./coords";
 
-/** One 16x96x16 vertical column of the world, block ids stored one byte each. */
+/** One 16x128x16 vertical column of the world, block ids stored one byte each. */
 export class Chunk {
   readonly cx: number;
   readonly cz: number;

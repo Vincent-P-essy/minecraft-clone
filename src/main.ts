@@ -1,19 +1,20 @@
 import "./style.css";
 import * as THREE from "three";
 import { ChunkMeshManager } from "./render/chunk-mesh-manager";
-import { createChunkMaterial, updateChunkMaterial } from "./render/chunk-material";
-import { Clouds } from "./render/clouds";
 import { CpuRenderer } from "./render/cpu-renderer";
-import { createGameScene } from "./render/scene";
+import { environmentAt } from "./render/environment";
+import { WorldRenderer } from "./render/renderer";
 import { DAY_LENGTH_SECONDS, STARTUP_PHASE, skyStateAt } from "./render/sky";
-import { createBlockTextureArray, createTextureAtlas } from "./render/texture-atlas";
+import { createTextureAtlas } from "./render/texture-atlas";
 import { PlayerController } from "./player/controller";
 import { BlockInteraction } from "./player/interaction";
+import { defaultSettings, SettingsStore } from "./settings";
 import { Hotbar } from "./ui/hotbar";
 import { Hud } from "./ui/hud";
 import { isTouchDevice, TouchControls } from "./ui/touch-controls";
 import { EditStore } from "./world/edit-store";
 import { findPleasantSpawn } from "./world/spawn";
+import { createColumnSampler } from "./world/terrain";
 import {
   type ChunkGenerator,
   ChunkStreamer,
@@ -23,13 +24,9 @@ import {
 import { World } from "./world/world";
 
 const DEFAULT_SEED = 2026;
-const STREAM_RADIUS_WEBGL = 9; // greedy meshing makes the extra draw distance affordable
-const STREAM_RADIUS_CPU = 4; // rays reach ~52 blocks; a tighter ring is plenty
+const STREAM_RADIUS_CPU = 4;
 const WARMUP_RADIUS_CHUNKS = 2;
-const MESH_BUDGET_PER_FRAME = 3;
 
-// Read-only debug handle for the visual-check harness (scripts/visual-check.mjs):
-// lets an automated browser assert on game state instead of guessing from pixels.
 declare global {
   interface Window {
     __mc?: {
@@ -44,14 +41,16 @@ declare global {
       meshedChunks: () => number;
       pendingChunks: () => number;
       seed: number;
+      setTime?: (phase: number) => void;
+      setQuality?: (q: string) => void;
+      teleport?: (x: number, y: number, z: number, yaw: number, pitch: number) => void;
+      stats?: () => unknown;
+      groundAt?: (x: number, z: number) => number;
+      locate?: (biome: number, skip?: number) => { x: number; z: number; h: number } | null;
     };
   }
 }
 
-/** A dead "Click to play" button is the worst failure mode a browser game
- * can have. If anything at all goes wrong during boot — and the WebGL and
- * worker paths already have their own fallbacks — say so, visibly, in the
- * overlay the player is already looking at. */
 function showFatalError(error: unknown): void {
   const content = document.querySelector("#overlay-content");
   if (!content) return;
@@ -61,27 +60,7 @@ function showFatalError(error: unknown): void {
   title.textContent = "the game couldn't start";
   const detail = document.createElement("p");
   detail.textContent = message;
-  const hint = document.createElement("p");
-  hint.textContent =
-    "Try a hard refresh (Ctrl+Shift+R) or another browser (Chrome/Firefox). " +
-    "If it keeps happening, please open an issue with this exact message.";
-  content.append(title, detail, hint);
-}
-
-/** What the game loop needs from a renderer — satisfied by the Three.js
- * scene when WebGL exists, and by the CPU raycaster when it doesn't. */
-interface GameView {
-  readonly kind: "webgl" | "cpu";
-  readonly camera: THREE.PerspectiveCamera;
-  readonly domElement: HTMLElement;
-  render(elapsedSeconds: number): void;
-  resize(width: number, height: number): void;
-  applySky(state: ReturnType<typeof skyStateAt>): void;
-  /** Optional adaptive quality hook (WebGL scales its pixel ratio; the CPU
-   * renderer already adapts its own internal resolution). */
-  tickAdaptive?(frameMs: number): void;
-  /** A short label for the HUD describing the current quality target. */
-  qualityNote(): string;
+  content.append(title, detail);
 }
 
 function boot(): void {
@@ -90,74 +69,68 @@ function boot(): void {
   const hotbarContainer = document.querySelector<HTMLDivElement>("#hotbar");
   if (!hotbarContainer) throw new Error("#hotbar not found");
 
-  // A shareable world: ?seed=1234 loads the same terrain for everyone.
-  const seedParam = new URLSearchParams(window.location.search).get("seed");
+  const params = new URLSearchParams(window.location.search);
+  const seedParam = params.get("seed");
   const parsedSeed = seedParam === null ? NaN : Number.parseInt(seedParam, 10);
   const SEED = Number.isFinite(parsedSeed) ? parsedSeed : DEFAULT_SEED;
+
+  const touch = isTouchDevice();
+  const settings = new SettingsStore(
+    window.localStorage,
+    defaultSettings({ touch, cores: navigator.hardwareConcurrency || 4 }),
+  );
+  const q = params.get("quality");
+  if (q === "low" || q === "medium" || q === "high" || q === "ultra") settings.values.quality = q;
+  const viewParam = Number.parseInt(params.get("view") ?? "", 10);
+  if (Number.isFinite(viewParam))
+    settings.values.viewDistance = Math.max(2, Math.min(16, viewParam));
 
   const world = new World(SEED);
   const atlas = createTextureAtlas(SEED);
 
-  // The renderer: WebGL when the browser can, an in-house CPU raycaster
-  // when it can't. Same world, same physics, same controls either way.
-  let view: GameView;
+  let webgl: WorldRenderer | null = null;
+  let cpu: CpuRenderer | null = null;
   let chunkMeshes: ChunkMeshManager | null = null;
-  let clouds: Clouds | null = null;
   let highlight: THREE.LineSegments | null = null;
-  let cpuView: CpuRenderer | null = null;
   try {
-    const gameScene = createGameScene(app);
-    const chunkMaterial = createChunkMaterial(createBlockTextureArray(SEED));
-    view = {
-      kind: "webgl",
-      camera: gameScene.camera,
-      domElement: gameScene.renderer.domElement,
-      render: () => {
-        gameScene.render();
-      },
-      resize: gameScene.resize,
-      applySky: (state) => {
-        gameScene.applySky(state);
-        updateChunkMaterial(chunkMaterial, state);
-      },
-      tickAdaptive: gameScene.tickAdaptive,
-      qualityNote: () => `${Math.round(gameScene.pixelRatio() * 100)}% scale`,
+    webgl = new WorldRenderer(app, SEED, settings.values.quality, settings.values.viewDistance);
+    const cores = navigator.hardwareConcurrency || 4;
+    chunkMeshes = new ChunkMeshManager(
+      webgl.scene,
+      world,
+      { terrain: webgl.terrainMaterial, water: webgl.waterMaterial },
+      Math.max(1, Math.min(3, cores - 2)),
+    );
+    const r = webgl;
+    const m = chunkMeshes;
+    webgl.onMaterialsChanged = () => {
+      m.setMaterials({ terrain: r.terrainMaterial, water: r.waterMaterial });
     };
-    chunkMeshes = new ChunkMeshManager(gameScene.scene, world, chunkMaterial);
-    clouds = new Clouds(gameScene.scene, SEED);
     highlight = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),
-      new THREE.LineBasicMaterial({ color: 0x000000 }),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.7 }),
     );
     highlight.visible = false;
-    gameScene.scene.add(highlight);
+    webgl.scene.add(highlight);
   } catch (webglError) {
-    console.warn("WebGL unavailable, switching to the CPU raycaster:", webglError);
-    const cpu = new CpuRenderer(app, world, SEED);
-    cpuView = cpu;
-    view = {
-      kind: "cpu",
-      camera: cpu.camera,
-      domElement: cpu.domElement,
-      render: (elapsed) => {
-        cpu.render(elapsed);
-      },
-      resize: (w, h) => {
-        cpu.resize(w, h);
-      },
-      applySky: (state) => {
-        cpu.applySky(state);
-      },
-      qualityNote: () => `cpu ${cpu.internalWidth.toString()}p`,
-    };
+    console.warn("WebGL2 unavailable, switching to the CPU raycaster:", webglError);
+    cpu = new CpuRenderer(app, world, SEED);
   }
+  const view = webgl ?? cpu;
+  if (!view) throw new Error("no renderer could be created");
+  const { camera, domElement } = view;
 
   const editStore = new EditStore(window.localStorage, SEED);
   const streamer = new ChunkStreamer(world, {
-    radius: view.kind === "webgl" ? STREAM_RADIUS_WEBGL : STREAM_RADIUS_CPU,
+    radius: webgl ? settings.values.viewDistance + 1 : STREAM_RADIUS_CPU,
     editStore,
+    shape: webgl ? "disc" : "square",
+    meshWhenSurrounded: webgl !== null,
+    onLoad: (cx, cz) => {
+      chunkMeshes?.chunkLoaded(cx, cz);
+    },
     onUnload: (cx, cz) => {
-      chunkMeshes?.removeChunkMesh(cx, cz);
+      chunkMeshes?.chunkUnloaded(cx, cz);
     },
   });
   const receive = (cx: number, cz: number, buffer: Uint8Array): void => {
@@ -166,34 +139,36 @@ function boot(): void {
   let generator: ChunkGenerator;
   try {
     if (typeof Worker === "undefined") throw new Error("workers unavailable");
-    generator = createWorkerGenerator(SEED, receive);
+    generator = createWorkerGenerator(SEED, receive, 2);
   } catch {
-    // No module workers? Generate on the main thread — slower on chunk
-    // arrival, but the game works everywhere.
     generator = createSyncGenerator(SEED, receive);
   }
   streamer.attachGenerator(generator);
 
   const spawn = findPleasantSpawn(SEED);
-  // Ground under the player's feet before the first frame; the rest streams in.
   streamer.warmUp(spawn.x, spawn.z, WARMUP_RADIUS_CHUNKS);
 
-  const player = new PlayerController(view.camera, view.domElement, world, spawn.x, spawn.z);
+  const player = new PlayerController(camera, domElement, world, spawn.x, spawn.z, {
+    sensitivity: settings.values.sensitivity,
+    invertY: settings.values.invertY,
+    autoJump: settings.values.autoJump,
+    viewBob: settings.values.viewBob,
+    fov: settings.values.fov,
+  });
   const hotbar = new Hotbar(hotbarContainer, atlas.canvas);
   const interaction = new BlockInteraction(
-    view.camera,
-    view.domElement,
+    camera,
+    domElement,
     world,
-    chunkMeshes ?? { updateChunk: () => undefined },
+    chunkMeshes ?? { blockChanged: () => undefined },
     hotbar,
     player,
   );
-  interaction.onEdit = (x, y, z, id) => {
-    editStore.record(x, y, z, id);
+  interaction.onEdit = (edit) => {
+    editStore.record(edit.x, edit.y, edit.z, edit.id);
   };
 
-  // On-screen controls for touch devices — joystick, look-drag, jump/place.
-  const touchControls = isTouchDevice()
+  const touchControls = touch
     ? new TouchControls(app, {
         isActive: () => player.isActive,
         onInput: (input) => {
@@ -215,8 +190,12 @@ function boot(): void {
   const hud = new Hud(app);
 
   window.addEventListener("resize", () => {
-    view.resize(window.innerWidth, window.innerHeight);
+    webgl?.resize(window.innerWidth, window.innerHeight);
+    cpu?.resize(window.innerWidth, window.innerHeight);
   });
+
+  let timeOffset = STARTUP_PHASE * DAY_LENGTH_SECONDS;
+  let frozenTime: number | null = null;
 
   window.__mc = {
     position: () => ({ ...player.position }),
@@ -227,25 +206,61 @@ function boot(): void {
     },
     pitch: () => player.eyePitch,
     mode: () => player.mode,
-    renderer: () => view.kind,
+    renderer: () => (webgl ? "webgl" : "cpu"),
     touch: () => touchControls !== null,
     loadedChunks: () => world.loadedChunkCount,
     meshedChunks: () => chunkMeshes?.meshedChunkCount ?? world.loadedChunkCount,
     pendingChunks: () => streamer.pendingCount,
     seed: SEED,
+    setTime: (phase) => {
+      frozenTime = phase * DAY_LENGTH_SECONDS;
+    },
+    setQuality: (level) => {
+      if (level === "low" || level === "medium" || level === "high" || level === "ultra") {
+        webgl?.setQuality(level);
+      }
+    },
+    teleport: (x, y, z, yaw, pitch) => {
+      player.restore({ x, y, z, yaw, pitch, flying: true });
+    },
+    groundAt: (x, z) => createColumnSampler(SEED)(x, z).terrainHeight,
+    locate: (biome, skip = 0) => {
+      const sample = createColumnSampler(SEED);
+      let found = 0;
+      for (let radius = 0; radius < 4000; radius += 24) {
+        for (let i = -radius; i <= radius; i += 24) {
+          for (const [x, z] of [
+            [i, -radius],
+            [i, radius],
+            [-radius, i],
+            [radius, i],
+          ] as const) {
+            const p = sample(x, z);
+            if (p.biome === biome && found++ >= skip) return { x, z, h: p.terrainHeight };
+          }
+        }
+      }
+      return null;
+    },
+    stats: () => ({
+      ...webgl?.stats(),
+      quads: chunkMeshes?.quadTotal,
+      queued: chunkMeshes?.queuedCount,
+      scale: webgl?.renderScale,
+    }),
   };
+  if (params.has("fullres")) webgl?.lockFullResolution();
 
   const startedAt = performance.now();
   let lastTime = startedAt;
   const frame = (time: number): void => {
     const frameDelta = time - lastTime;
-    const dt = Math.min(frameDelta / 1000, 0.1); // clamp to avoid a huge step after a tab switch
+    const dt = Math.min(frameDelta / 1000, 0.1);
     lastTime = time;
-    const elapsed = (time - startedAt) / 1000 + STARTUP_PHASE * DAY_LENGTH_SECONDS;
+    const elapsed = frozenTime ?? (time - startedAt) / 1000 + timeOffset;
+    timeOffset += 0;
 
-    // Adaptive quality: feed the real frame cadence so the renderer can
-    // trade resolution for a fluid frame rate on weaker (mobile) hardware.
-    view.tickAdaptive?.(frameDelta);
+    webgl?.tickAdaptive(frameDelta);
 
     if (touchControls && player.isActive !== touchVisible) {
       touchVisible = player.isActive;
@@ -255,21 +270,18 @@ function boot(): void {
     streamer.update(player.position.x, player.position.z);
     player.update(dt);
 
-    for (const { cx, cz } of streamer.drainDirty(MESH_BUDGET_PER_FRAME)) {
-      chunkMeshes?.updateChunk(cx, cz);
+    if (chunkMeshes) {
+      chunkMeshes.setFocus(player.position.x, player.position.z);
+      for (const { cx, cz } of streamer.drainDirty(64)) chunkMeshes.updateChunk(cx, cz);
+      chunkMeshes.pump();
     }
-
-    view.applySky(skyStateAt(elapsed));
-    clouds?.update(player.position.x, player.position.z, elapsed);
 
     const hit = interaction.raycastFromCamera();
     if (highlight) {
       highlight.visible = hit !== null;
-      if (hit) {
-        highlight.position.set(hit.blockX + 0.5, hit.blockY + 0.5, hit.blockZ + 0.5);
-      }
+      if (hit) highlight.position.set(hit.blockX + 0.5, hit.blockY + 0.5, hit.blockZ + 0.5);
     }
-    cpuView?.setHighlight(hit ? { x: hit.blockX, y: hit.blockY, z: hit.blockZ } : null);
+    cpu?.setHighlight(hit ? { x: hit.blockX, y: hit.blockY, z: hit.blockZ } : null);
 
     hud.frame(time, {
       x: player.position.x,
@@ -277,10 +289,18 @@ function boot(): void {
       z: player.position.z,
       chunks: world.loadedChunkCount,
       seed: SEED,
-      note: view.qualityNote(),
+      note: webgl
+        ? `${webgl.qualityLevel} ${Math.round(webgl.renderScale * 100)}%`
+        : `cpu ${(cpu?.internalWidth ?? 0).toString()}p`,
     });
 
-    view.render(elapsed);
+    if (webgl) {
+      webgl.setEnvironment(environmentAt(elapsed), (time - startedAt) / 1000, player.eyeInWater);
+      webgl.render();
+    } else if (cpu) {
+      cpu.applySky(skyStateAt(elapsed));
+      cpu.render(elapsed);
+    }
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
