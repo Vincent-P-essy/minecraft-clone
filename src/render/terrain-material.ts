@@ -181,7 +181,8 @@ const TERRAIN_FRAGMENT = /* glsl */ `
     shadow = mix(1.0, shadow, uShadowStrength) * cloudShadow(world, uLightDir);
 
     vec3 direct = uLightColor * ndl * shadow;
-    vec3 torch = uBlockLight * (blkL * blkL * blkL * 1.5 + blkL * 0.22);
+    // Steep falloff: a pool of light around each source, darkness between.
+    vec3 torch = uBlockLight * (blkL * blkL * blkL * 1.7 + blkL * 0.05);
 
     vec3 color = albedo * ((ambient + uMinAmbient) * ao + direct + torch * mix(ao, 1.0, 0.35));
     // Emissive blocks mark their glowing texels with full alpha.

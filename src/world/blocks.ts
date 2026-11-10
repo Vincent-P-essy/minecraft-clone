@@ -134,7 +134,7 @@ export const BLOCKS: Readonly<Record<BlockId, BlockDef>> = {
   [BlockId.LANTERN]: block(BlockId.LANTERN, "lantern", { emission: 15 }),
   [BlockId.COAL_ORE]: block(BlockId.COAL_ORE, "coal ore"),
   [BlockId.GOLD_ORE]: block(BlockId.GOLD_ORE, "gold ore"),
-  [BlockId.CRYSTAL]: block(BlockId.CRYSTAL, "lumen crystal", { emission: 11 }),
+  [BlockId.CRYSTAL]: block(BlockId.CRYSTAL, "lumen crystal", { emission: 9 }),
   [BlockId.PALE_WOOD]: block(BlockId.PALE_WOOD, "pale log"),
   [BlockId.AUTUMN_LEAVES]: block(BlockId.AUTUMN_LEAVES, "autumn leaves", LEAF),
   [BlockId.PINE_WOOD]: block(BlockId.PINE_WOOD, "pine log"),
@@ -146,7 +146,7 @@ export const BLOCKS: Readonly<Record<BlockId, BlockDef>> = {
   [BlockId.SANDSTONE]: block(BlockId.SANDSTONE, "sandstone"),
   [BlockId.DRY_BUSH]: plant(BlockId.DRY_BUSH, "dry bush"),
   [BlockId.FROSTED_GRASS]: block(BlockId.FROSTED_GRASS, "frosted grass"),
-  [BlockId.GLOWSHROOM]: plant(BlockId.GLOWSHROOM, "glowshroom", { emission: 9, sway: "none" }),
+  [BlockId.GLOWSHROOM]: plant(BlockId.GLOWSHROOM, "glowshroom", { emission: 7, sway: "none" }),
   [BlockId.CLAY]: block(BlockId.CLAY, "clay"),
 };
 

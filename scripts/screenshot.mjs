@@ -85,8 +85,8 @@ function buildCabin() {
   m.teleport(ox + 9.5, g + 4.2, oz + 15.5, 0.42, -0.16);
 }
 
-/** Runs in the page: finds a lumen crystal with open cave beside it and
- * stands the camera a few blocks back, looking at it. */
+/** Runs in the page: finds a lumen crystal deep underground with open cave
+ * beside it and stands the camera a few blocks back, looking at it. */
 function findCrystalCave() {
   const m = window.__mc;
   const p = m.position();
@@ -96,7 +96,7 @@ function findCrystalCave() {
     for (let x = -r; x <= r; x++) {
       for (let z = -r; z <= r; z++) {
         if (Math.max(Math.abs(x), Math.abs(z)) !== r) continue;
-        for (let y = 8; y < 40; y++) {
+        for (let y = 6; y < 26; y++) {
           if (m.blockAt(px + x, y, pz + z) !== 21) continue;
           for (const [dx, dz] of [
             [1, 0],

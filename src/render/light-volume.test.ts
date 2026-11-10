@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BlockId } from "../world/blocks";
+import { BLOCKS, BlockId } from "../world/blocks";
 import { Chunk } from "../world/chunk";
 import { World } from "../world/world";
 import { buildLightVolume, type LightVolume, ORIGIN, STRIDE_Y, STRIDE_Z } from "./light-volume";
@@ -146,8 +146,11 @@ describe("block light", () => {
         c.setBlock(8, 30, 8, BlockId.CRYSTAL);
       }),
     );
-    expect(v.blk[at(9, 30, 8)]).toBe(10);
-    expect(v.blk[at(8, 30, 8)]).toBe(11);
+    const emission = BLOCKS[BlockId.CRYSTAL].emission;
+    expect(emission).toBeLessThan(BLOCKS[BlockId.LANTERN].emission);
+    expect(v.blk[at(8, 30, 8)]).toBe(emission);
+    expect(v.blk[at(9, 30, 8)]).toBe(emission - 1);
+    expect(v.blk[at(8 + emission, 30, 8)]).toBe(0);
   });
 });
 
