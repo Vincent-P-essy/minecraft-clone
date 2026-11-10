@@ -660,12 +660,13 @@ try {
   const moved = Math.hypot(afterMove.x - beforeMove.x, afterMove.z - beforeMove.z);
   report("the joystick moves the player", moved > 1, `moved ${moved.toFixed(1)} blocks`);
 
-  // Look down with a right-side drag, then a quick tap to break.
-  for (let step = 0; step < 6; step++) {
-    await touch(step === 0 ? "pointerdown" : "pointermove", 300, 200 + step * 70, 2);
+  // Look straight down with a long right-side drag (the pitch clamps), so
+  // the crosshair lands on whatever the player is standing on, then tap.
+  for (let step = 0; step < 9; step++) {
+    await touch(step === 0 ? "pointerdown" : "pointermove", 300, 120 + step * 60, 2);
   }
-  await touch("pointerup", 300, 550, 2);
-  await sleep(300);
+  await touch("pointerup", 300, 600, 2);
+  await until(mobilePage, () => window.__mc.target() !== null, undefined, 8_000);
   const mobileTarget = await mobilePage.evaluate(() => window.__mc.target());
   if (mobileTarget) {
     // A genuine quick tap: down and up in one round trip, so the in-page
