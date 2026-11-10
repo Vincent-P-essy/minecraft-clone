@@ -84,16 +84,10 @@ self.addEventListener("fetch", (event) => {
 // Three ways the same build is hosted:
 //  - GitHub Pages serves it from /minecraft-clone/ (a project page);
 //  - the desktop and mobile shells load it from disk, so every URL must be
-//    relative (BUILD_TARGET=native);
+//    relative (`vite build --mode native`);
 //  - anything else serves it from the root.
-const base = process.env.GITHUB_PAGES
-  ? "/minecraft-clone/"
-  : process.env.BUILD_TARGET === "native"
-    ? "./"
-    : "/";
-
-export default defineConfig({
-  base,
+export default defineConfig(({ mode }) => ({
+  base: process.env.GITHUB_PAGES ? "/minecraft-clone/" : mode === "native" ? "./" : "/",
   plugins: [offlineServiceWorker()],
   worker: {
     format: "es",
@@ -106,4 +100,4 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
   },
-});
+}));

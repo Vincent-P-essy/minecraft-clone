@@ -390,7 +390,7 @@ function fillColumn(
         id === BlockId.STONE &&
         cheese > CRYSTAL_BAND &&
         y < SEA_LEVEL - 4 &&
-        (hash3(seed ^ 0xc457, worldX >> 1, y >> 1, worldZ >> 1) & 7) === 0
+        (hash3(seed ^ 0xc457, worldX >> 1, y >> 1, worldZ >> 1) & 15) === 0
       ) {
         // Crystals grow in the walls right around caverns, where they'll be seen.
         id = BlockId.CRYSTAL;

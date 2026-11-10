@@ -7,10 +7,9 @@
   "author": "Vincent Plessy",
   "main": "main.cjs",
   "scripts": {
-    "build:web": "cd .. && BUILD_TARGET=native npm run build",
-    "start": "npm run build:web && electron .",
-    "dist": "npm run build:web && electron-builder",
-    "dist:dir": "npm run build:web && electron-builder --dir"
+    "start": "electron .",
+    "dist": "electron-builder --publish never",
+    "dist:dir": "electron-builder --dir"
   },
   "devDependencies": {
     "electron": "^45.2.3",

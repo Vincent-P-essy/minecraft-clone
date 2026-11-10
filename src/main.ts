@@ -553,8 +553,9 @@ function boot(): void {
     },
   };
 
-  // Installable and playable offline (production builds only).
-  if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  // Installable and playable offline (web production builds only; the
+  // desktop and mobile shells already ship every file on disk).
+  if (import.meta.env.PROD && import.meta.env.MODE !== "native" && "serviceWorker" in navigator) {
     navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => undefined);
   }
 

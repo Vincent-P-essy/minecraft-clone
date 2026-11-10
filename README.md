@@ -1,7 +1,9 @@
-# minecraft-clone
+# Lumenwild
 
-> An infinite voxel world in your browser tab. No install, no assets, no
-> server — every block, texture, and cloud is computed from one seed.
+> An endless voxel world of light. Explore, dig and build across forests,
+> deserts, snow peaks and glowing caves — in a browser tab, as a desktop
+> app, or on a phone. No assets ship with it: every block, texture, cloud
+> and sound is computed from one seed.
 
 [![CI](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/ci.yml)
 [![Deploy](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/pages.yml/badge.svg)](https://github.com/Vincent-P-essy/minecraft-clone/actions/workflows/pages.yml)
@@ -10,193 +12,182 @@
 
 **▶ Play it now: [vincent-p-essy.github.io/minecraft-clone](https://vincent-p-essy.github.io/minecraft-clone/)**
 
-## Gameplay
+![A lantern-lit cabin at dusk, the sea behind it](docs/screenshots/hero-dusk.jpg)
 
-![Exploring the generated voxel terrain](docs/screenshots/world-exploration.webp)
+|                                                                                   |                                                                          |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| ![The same cabin at night, lanterns glowing](docs/screenshots/night-lanterns.jpg) | ![A snow-capped mountain over a pine forest](docs/screenshots/vista.jpg) |
+| ![Sunlight through a forest canopy](docs/screenshots/forest.jpg)                  | ![Sunset over a river mouth](docs/screenshots/sunset-shore.jpg)          |
+| ![Lumen crystals lighting a cave](docs/screenshots/cave-crystals.jpg)             | ![The game on a phone, with touch controls](docs/screenshots/mobile.jpg) |
 
-![Block interaction with persistent world edits](docs/screenshots/block-interaction.webp)
+_All captured from the production build by `scripts/screenshot.mjs`, in
+software WebGL — a real GPU draws the same frames, just faster._
 
-Captured from the running production build with seed `12345`, after moving through the terrain and breaking and placing blocks.
+## Playing
 
-A Minecraft-inspired voxel game built from scratch with Three.js and
-TypeScript: procedurally generated infinite terrain with forests, deserts,
-snowy peaks and cave systems, a full day/night cycle, and free block
-building — with your edits persisted across reloads.
+|                      | Desktop                                            | Touch                                        |
+| -------------------- | -------------------------------------------------- | -------------------------------------------- |
+| Move / jump / sprint | `WASD` (or arrows) · `Space` · `Shift`             | left-thumb joystick (push to edge to sprint) |
+| Fly                  | double-tap `Space` or `F` · `Space` up · `C` down  | wing button · jump up · descend button       |
+| Look                 | mouse (pointer lock)                               | drag the right half of the screen            |
+| Break / place / pick | left click (hold to repeat) / right / middle click | tap to break · place button                  |
+| Choose a block       | `1`-`9` or scroll · `E` opens all 32 blocks        | tap a slot · grid button opens all blocks    |
+| Pause / stats        | `Esc` · `F3`                                       | pause button                                 |
+| Share a world        | Worlds menu, or add `?seed=<number>` to the URL    | same                                         |
 
-|                       | Desktop                                   | Touch                                        |
-| --------------------- | ----------------------------------------- | -------------------------------------------- |
-| Move / jump / sprint  | `WASD` · `Space` · `Shift`                | left-thumb joystick (push to edge to sprint) |
-| Swim                  | `Space` in water (hop out at the surface) | jump button in water                         |
-| Look                  | mouse (pointer lock — click to start)     | drag the right half of the screen            |
-| Break / place a block | left click (hold to repeat) / right click | tap to break · place button                  |
-| Pick a block          | `1`-`9` or scroll wheel                   | tap a hotbar slot                            |
-| Share your world      | add `?seed=<number>` to the URL           | same                                         |
+Keys are bound by position, so `WASD` is `ZQSD` on an AZERTY keyboard with
+no configuration. If the browser refuses pointer lock the game switches to
+drag-to-look on its own; if there is no WebGL2 at all it falls back to a
+CPU raycaster and keeps playing.
 
-**It plays on your phone.** On a touch device the game grows a floating
-joystick, a look surface, and jump/place buttons — no keyboard needed:
+Your position, the time of day, your hotbar and everything you built are
+saved per world and restored when you come back. Settings (graphics tier,
+view distance, field of view, sensitivity, volume, auto-jump…) apply live.
 
-<p align="center"><img src="docs/screenshot-mobile.png" alt="The game on a phone in portrait, with a floating movement joystick and jump/place buttons" width="300"></p>
+## What's in the world
 
-If your browser refuses pointer lock (some extensions and embedded contexts
-block it silently), the desktop game switches to **drag-to-look** on its
-own. And if your machine has **no WebGL at all**, the game doesn't
-apologize — it switches to its own **CPU raycaster** and keeps playing:
+- **Terrain**: continents and oceans, rivers that cut valleys to the sea,
+  ridged mountains up to ~115 blocks, ten biomes (meadow, oak forest,
+  autumn grove, pine forest, desert, tundra, mountain, snow peak, beach,
+  ocean) with their own trees, plants and ground.
+- **Underground**: caverns linked by winding tunnels, coal and gold veins,
+  lumen crystals in cavern walls and glowing mushrooms on their floors —
+  caves are lit from within before you bring a single lantern.
+- **34 block types**, 32 of them placeable: stone and brick variants, three
+  woods, planks, glass, ice, sand and sandstone, plants and flowers, and
+  light sources.
 
-![The same bay rendered by the CPU raycaster: chunky pixels, clouds, an island with a tree](docs/screenshot-cpu.png)
-
-_Same world, same physics, same controls — zero GPU. This mode exists
-because a real player hit exactly that._
-
-## What's inside
+## How it's drawn
 
 ```mermaid
 flowchart LR
-    S[("seed")] --> T["terrain.ts<br/>fBm heightmap · biomes<br/>3D-noise caves · trees"]
-    T --> W["Web Worker<br/>chunk generation"]
-    W -->|transferable buffers| ST["streamer.ts<br/>load/unload around player"]
-    E[("localStorage<br/>edit overlay")] --> ST
-    ST --> M["Web Worker<br/>greedy meshing · per-vertex AO"]
-    M -->|transferable geometry| R["Three.js scene<br/>texture-array shader<br/>day/night sky · clouds"]
-    P["player<br/>swept AABB physics<br/>DDA voxel raycast"] --> ST
-    P --> R
+    S[("seed")] --> T["terrain.ts<br/>continents · rivers · biomes<br/>caves · ores · trees"]
+    T --> G["generation workers"]
+    G -->|block buffers| ST["streamer.ts<br/>disc around the player"]
+    E[("localStorage<br/>edits · player · settings")] --> ST
+    ST -->|3x3 neighborhood ready| M["mesh workers<br/>voxel light solve<br/>greedy mesh · packed vertices"]
+    M -->|8 bytes / vertex| R["renderer.ts"]
+    R --> SH["shadow map"]
+    R --> W["world pass (HDR)<br/>terrain · sky · water · particles"]
+    W --> P["post<br/>bloom · god rays · ACES · FXAA"]
+    PL["player<br/>fixed-step physics<br/>DDA raycast"] --> ST
+    PL --> R
 ```
 
-- **Terrain is a pure function of (seed, world position).** Height, biome,
-  cave carving, and even tree placement are all recomputable by any chunk
-  independently — a canopy that leans across a chunk border gets identical
-  blocks stamped from both sides without any chunk-to-chunk communication.
-  That one design decision is what makes the world seamless _and_ the
-  generator trivially parallelizable.
-- **Generation _and_ meshing run in Web Workers.** Terrain generation
-  returns block buffers as transferables; a second worker holds a resident
-  mirror of the loaded chunks and does the greedy meshing off the main
-  thread, streaming finished geometry back (also transferable, zero copy).
-  The main thread never blocks on a remesh, so the frame rate holds steady
-  while you explore or dig. Results are generation-tagged, so a mesh that
-  finishes after its chunk was re-edited or unloaded is dropped, not shown
-  stale. Without workers it falls back to synchronous meshing.
-- **The mesher greedy-meshes with real ambient occlusion.** Per-vertex AO
-  (the classic "0fps" formulation, with each quad's diagonal flipped toward
-  the brighter vertex pair to kill the anisotropic dark-streak artifact),
-  and then coplanar faces that share a tile and the exact same 4-corner AO
-  pattern merge into one big quad — ~25% fewer triangles over real terrain,
-  and far fewer on flat expanses. Because merged quads span many blocks,
-  chunks render from a **WebGL2 texture array** through a custom shader that
-  repeats the tile with `fract()` (an atlas would bleed into its
-  neighbors), keeping one draw call per chunk and the crisp per-block grid.
-- **Zero art assets.** The entire texture atlas (grass, sand, wood rings,
-  bark, water...) is drawn onto a small canvas at startup with a seeded
-  PRNG. The hotbar icons are cropped from the same canvas.
-- **Physics never touches the renderer.** Movement is a pure per-axis swept
-  AABB resolver over a `(x, y, z) => solid?` closure; block targeting is an
-  Amanatides-Woo DDA raycast that visits every voxel boundary (a thin wall
-  can't be skipped the way fixed-step sampling would). Both are unit-tested
-  against synthetic terrain with no DOM or WebGL anywhere in sight.
-- **Edits survive.** Broken and placed blocks are stored as a sparse
-  overlay in `localStorage`, keyed by seed, and re-applied over freshly
-  generated chunks — an explored world costs kilobytes, not megabytes.
-- **Two renderers, one game.** The WebGL path draws meshed chunks with
-  baked AO; the CPU path marches one ray per pixel straight through the
-  block data (no meshes at all) with the same face shading, fog, water
-  tint, clouds and day/night palette. Everything else — world, streaming,
-  physics, interaction — is shared and renderer-blind.
-- **It runs fast on weak hardware, and stays fast.** The CPU raycaster only
-  traces a real ray for one pixel in four: each traced ray records a
-  compact hit signature, and the pixels between them interpolate wherever
-  their neighbors agree (flat surfaces, sky, open water) and re-trace only
-  across silhouettes and edges — a quarter of the ray budget for a
-  near-identical image, so it holds a high internal resolution. Block
-  reads in the hot loop go through a flat chunk lookup table, not a hash
-  map. Both renderers watch their own frame time and trade resolution for
-  smoothness: the CPU path scales its internal buffer (260–720px), the
-  WebGL path steps its device-pixel-ratio down a ladder — so a phone GPU
-  and a desktop GPU both converge on a fluid frame rate instead of a fixed
-  quality that's wrong for one of them. The triangle savings from greedy
-  meshing are spent on more draw distance, not just more frames; index
-  buffers use 16-bit indices wherever a chunk fits under 65536 vertices
-  (nearly always, after greedy merging), halving their upload.
-- **Input-agnostic core.** Keyboard, mouse, drag-look, and the on-screen
-  touch controls all feed the same controller and interaction through a
-  tiny surface (`setExternalInput`, `lookBy`, `breakTargetedBlock`). Adding
-  the entire mobile control scheme touched no game logic.
+- **Voxel lighting with no shared state.** Sky light and block light are
+  solved per chunk over its 3×3 neighborhood. Light travels at most 15
+  cells and the pad is 16, so the result inside the chunk is _exact_ — any
+  chunk can be lit from scratch and agree with its neighbors along the
+  border. That trades a little recomputation for never having a light
+  seam or an incremental-update bug, and it parallelizes trivially.
+- **Eight bytes a vertex.** Position, face, ambient occlusion, both light
+  channels, tile, and flags are packed into two `uint32`s (down from 48
+  bytes). Normals and texture coordinates are derived in the shader from
+  the face index and the position itself, and every chunk draws with one
+  shared index buffer.
+- **Caves are drawn only when you could see them.** About 70% of a chunk's
+  quads are cave walls no skylight reaches. They live in their own range
+  of the same vertex buffer, drawn within a few chunks of the player and
+  never into the shadow map; faces in total darkness also drop their
+  ambient-occlusion pattern so they merge into large quads.
+- **One sky, used three times.** The sky is an analytic gradient with a
+  sun glow, evaluated by the sky dome, by the fog (distance fades into the
+  colour that's actually behind it) and by the water (which reflects it).
+  Clouds come from one tiling noise texture sampled by the dome, by the
+  terrain for their moving shadows, and by the water for their reflection
+  — so the three always line up.
+- **A real light path.** Shadow-mapped sun and moon (texel-snapped,
+  normal-offset bias, PCF), HDR rendering, bloom, god rays, ACES tone
+  mapping. Water has Fresnel reflections, sliding ripples, depth-tinted
+  shallows and shore foam. Emissive texels are flagged in the texture's
+  alpha, so a lantern's glass glows and its iron frame doesn't.
+- **Four graphics tiers.** _Low_ draws straight to the screen with no
+  extra full-screen pass at all — that's the one for weak phones.
+  _Medium_ adds the HDR chain and a small shadow map; _High_ and _Ultra_
+  add MSAA, god rays and larger shadow maps. On top of the tier, a
+  controller watches frame time and steps the render scale to stay fluid.
+- **Motion that doesn't depend on the frame rate.** Physics runs at a fixed
+  120 Hz and the camera interpolates between the last two steps, so
+  movement is identical at 30, 60 or 144 Hz and a late frame isn't a
+  stutter.
+- **Zero art, zero audio files.** 41 textures are painted in code from a
+  seeded PRNG (the hotbar icons are little isometric cubes rendered from
+  them). Every sound — footsteps per material, digging, splashes, wind,
+  birdsong by day and crickets by night — is synthesized with Web Audio.
+
+## Platforms
+
+One build, three shells:
+
+- **Web / PWA** — `npm run build`. Installable from the browser; a
+  generated service worker precaches the build, so it boots and plays
+  offline.
+- **Desktop** — [`desktop/`](desktop), an Electron shell. The page runs
+  sandboxed and context-isolated with no Node integration; files are served
+  from a private `app://` scheme with path-traversal checks and a strict
+  Content-Security-Policy; navigation and permission requests are denied.
+- **Android / iOS** — [`mobile/`](mobile), Capacitor wrapping the same
+  build in a native WebView.
+
+```sh
+# desktop
+npm run build:native && cd desktop && npm ci && npm start     # run it
+npm run dist                                                  # installers in desktop/release
+
+# android (needs the Android SDK)
+npm run build:native && cd mobile && npm ci
+npx cap add android && npm run android:apk
+```
+
+[`docs/shipping.md`](docs/shipping.md) covers what stands between these
+builds and a store listing: signing, store requirements, and the
+non-technical checklist.
 
 ## Development
 
 ```sh
 npm ci
 npm run dev          # local dev server
-npm run test         # 216 offline tests (world, mesher, physics, raycast, streaming, sky, input)
-npm run lint && npm run typecheck
+npm run check        # lint, format, types, 325 offline tests
 npm run build        # production bundle
+
+npm run build && npx vite preview --port 4173 &
+npm run e2e          # 40 end-to-end checks in headless Chromium
+node scripts/screenshot.mjs   # regenerate the README gallery
 ```
 
 Everything interesting is testable without a browser: terrain determinism
-and seam consistency, cave/ocean-floor invariants, mesher face counts and
-AO levels and triangle winding, collision resolution, raycast face
-detection, streaming load/unload/persistence round trips, day/night
-continuity. CI runs the full gate on every push.
+and its layering invariants, light propagation (down shafts, under roofs,
+through leaves and water, across chunk borders), mesher output down to
+winding order and the surface/cave split, collision and flight, the
+day/night model's continuity, the generated textures' alpha conventions,
+and settings and saves against corrupt or hostile payloads.
 
-On top of that, `scripts/visual-check.mjs` boots the _built_ game in a
-headless Chromium (SwiftShader software WebGL — works on GPU-less machines
-and CI) and plays it: waits for the world to mesh, verifies the player
-spawned on solid ground, engages pointer lock, places a block on a
-neighboring column it picks by inspecting the world, breaks the block
-underfoot, walks — then opens a second page with `requestPointerLock`
-sabotaged to prove the drag-look fallback engages and stays fully playable
-(move, look, tap-break), a third page with `getContext('webgl')` sabotaged
-to prove the CPU raycaster boots, renders real terrain, moves and breaks,
-and a fourth emulating a **phone with a touchscreen** — proving the game
-detects touch, shows its on-screen controls, and is fully playable with a
-joystick drag and taps. 23 end-to-end checks with screenshots. It exists
-because unit tests can't see: the one real rendering bug this project
-shipped (an atlas UV/`flipY` mismatch that made grass sample an empty
-atlas region and leaves sample sand) was invisible to every unit test and
-obvious in the harness's first screenshot.
-
-```sh
-npm run build && npx vite preview --port 4173 &
-node scripts/visual-check.mjs                 # PASS/FAIL per check + screenshots
-node scripts/screenshot.mjs                   # regenerates docs/screenshot.png
-```
-
-## Design decisions
-
-- **Chunk-independent generation over chunk-to-chunk communication.** The
-  usual alternative — generate a chunk, then patch neighbors when a tree
-  overhangs — needs ordering, patch queues, and produces seams when it's
-  wrong. Making every feature a pure function of world position deletes
-  the whole problem class, at the cost of some redundant computation at
-  borders (cheap, and it runs in a worker anyway).
-- **Meshing on the main thread, generation off it.** Meshing needs
-  neighbor-chunk reads and produces GPU-bound buffers; shipping all that
-  state to a worker costs more than the ~1-2ms a chunk mesh takes. The
-  expensive, state-free part (noise sampling) is what moves.
-- **Reject-by-default physics steps.** The collision resolver assumes
-  small per-frame displacements and clamps them axis-by-axis; velocities
-  zero out on contact. Terminal velocity plus the per-axis sweep keeps
-  even long falls from tunneling through a floor.
-- **`localStorage` over a save-file format.** The overlay-over-regeneration
-  model means persistence is a dictionary, not a world serializer.
+On top of that, `scripts/visual-check.mjs` plays the _built_ game in
+headless Chromium with software WebGL — no GPU needed, so it runs in CI.
+Each scenario gets its own browser context, like a different player on a
+different device: mouse and keyboard with pointer lock, pointer lock
+refused (drag-look fallback), no WebGL at all (CPU raycaster), a phone
+with only a touchscreen, every graphics tier compiling and rendering,
+inventory, flight, settings and saves surviving a reload, and the service
+worker booting the game with the network cut. What was verified, and where
+it wasn't possible to verify, is recorded in
+[`docs/verification.md`](docs/verification.md).
 
 ## Limits
 
-- No lighting propagation (torches, sunlight flood fill) — AO plus
-  directional shading only. It's the single feature that would most change
-  the look of caves, and the natural next step.
-- The CPU renderer trades some fidelity for universality: procedural
-  texels instead of the full atlas and ~50 blocks of view distance. It
-  still carries per-pixel ambient occlusion, sun-tracked face lighting, a
-  sun disc, night stars, soft clouds, and the block-outline highlight.
-  Its edge-adaptive sampling assumes neighboring pixels usually agree;
-  that holds for blocky terrain but would smear a scene full of
-  fine per-pixel detail (which this one never has).
-- Water supports swimming (buoyancy, swim up, hop onto the shore) but
-  doesn't flow — breaking a dam doesn't flood anything.
-- No mobs, crafting, or inventory beyond the hotbar — the scope is the
-  world itself: generate, explore, dig, build.
-- Chunk meshes rebuild whole-chunk on edit (a greedy remesh, ~1ms) rather
-  than patching just the touched faces — fine in practice, and the greedy
-  pass keeps the rebuilt buffer small.
+- It's a creative sandbox: no survival mode, crafting, mobs or
+  multiplayer.
+- Water is still: it has depth, reflections and swimming, but breaking a
+  dam doesn't flood anything.
+- Block light is one channel, so a cyan crystal and an amber lantern cast
+  the same warm light.
+- The CPU fallback renderer trades fidelity for universality: flat-shaded
+  blocks, no plants or glass, a short view distance.
+- Frame rates on real phones and GPUs haven't been measured from this
+  repository's CI — the tiers and the adaptive scale are designed for
+  them, and the low tier is deliberately cheap, but treat performance on
+  a given device as something to test, not a promise.
 
 ## License
 

@@ -5,11 +5,10 @@
   "description": "Android and iOS shells for Lumenwild (Capacitor).",
   "author": "Vincent Plessy",
   "scripts": {
-    "build:web": "cd .. && BUILD_TARGET=native npm run build",
-    "sync": "npm run build:web && cap sync",
+    "sync": "cap sync",
     "android:add": "cap add android",
     "android:open": "cap open android",
-    "android:apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "android:apk": "cap sync android && cd android && ./gradlew assembleDebug",
     "ios:add": "cap add ios",
     "ios:open": "cap open ios"
   },

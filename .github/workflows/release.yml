@@ -1,0 +1,82 @@
+name: Release builds
+
+# Manual only: builds the installable desktop apps and a debug Android APK
+# from the current commit and attaches them to the run as artifacts.
+# Store-ready builds additionally need signing — see docs/shipping.md.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install (game)
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+      - name: Build (game, relative URLs)
+        run: npm run build:native
+      - name: Install (shell)
+        working-directory: desktop
+        run: npm ci
+      - name: Package
+        working-directory: desktop
+        run: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install (game)
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+      - name: Build (game, relative URLs)
+        run: npm run build:native
+      - name: Install (shell)
+        working-directory: mobile
+        run: npm ci
+      - name: Generate and sync the Android project
+        working-directory: mobile
+        run: |
+          npx cap add android
+          npx cap sync android
+      - name: Assemble a debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -16,6 +23,8 @@ jobs:
           cache: "npm"
       - name: Install
         run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
       - name: Lint
         run: npm run lint
       - name: Format
@@ -26,3 +35,32 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
+
+  # Plays the built game in headless Chromium (software WebGL): every
+  # graphics tier, mouse/keyboard, drag-look, the CPU renderer, touch,
+  # save/restore and offline boot.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Play it
+        run: |
+          npx vite preview --port 4173 &
+          npx --yes wait-on@8 --timeout 60000 http://localhost:4173/
+          npm run e2e -- --out visual-check
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-check
+          path: visual-check
+          retention-days: 7
