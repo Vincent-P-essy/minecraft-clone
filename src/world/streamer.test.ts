@@ -265,3 +265,35 @@ describe("disc-shaped loading", () => {
     expect(world.hasChunk(1, 1)).toBe(true);
   });
 });
+
+describe("settled world", () => {
+  it("stops scanning once everything in range is loaded, and resumes when the player moves", () => {
+    const world = new World(SEED);
+    let requests = 0;
+    const streamer = new ChunkStreamer(world, { radius: 2 });
+    const sync = createSyncGenerator(SEED, (cx, cz, buffer) => {
+      streamer.receive(cx, cz, buffer);
+    });
+    streamer.attachGenerator({
+      request: (cx, cz) => {
+        requests++;
+        sync.request(cx, cz);
+      },
+      dispose: () => undefined,
+    });
+    for (let i = 0; i < 20; i++) streamer.update(8, 8);
+    const settled = requests;
+    expect(world.loadedChunkCount).toBe(25);
+
+    // Standing still (or moving within the chunk) asks for nothing more...
+    for (let i = 0; i < 50; i++) streamer.update(8 + (i % 7), 8);
+    expect(requests).toBe(settled);
+
+    // ...even if a chunk goes missing behind its back, until the player
+    // crosses a chunk border and the set is re-examined.
+    streamer.update(8 + 16, 8);
+    for (let i = 0; i < 20; i++) streamer.update(8 + 16, 8);
+    expect(requests).toBeGreaterThan(settled);
+    expect(world.hasChunk(3, 0)).toBe(true);
+  });
+});

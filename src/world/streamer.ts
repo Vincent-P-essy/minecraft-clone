@@ -65,6 +65,7 @@ export class ChunkStreamer {
   /** Changes the load radius; the next update loads or drops to match. */
   setRadius(radius: number): void {
     this.radius = radius;
+    this.unsettled = true;
   }
 
   private inRange(dx: number, dz: number, radius: number): boolean {
@@ -120,12 +121,28 @@ export class ChunkStreamer {
     // The player's own chunk can never wait on the worker — physics needs it.
     this.loadSync(pcx, pcz);
 
-    this.requestMissing(pcx, pcz);
+    // The loaded set only needs re-examining when something could have
+    // changed it: the player crossed into another chunk, the radius moved,
+    // or requests are still outstanding or were held back by the throttle.
+    // A player standing still in a settled world costs nothing here.
+    const moved = pcx !== this.lastCx || pcz !== this.lastCz;
+    if (!moved && !this.unsettled && this.pending.size === 0) return;
+    this.lastCx = pcx;
+    this.lastCz = pcz;
+
+    this.unsettled = this.requestMissing(pcx, pcz);
     this.unloadFar(pcx, pcz);
   }
 
-  private requestMissing(pcx: number, pcz: number): void {
-    if (!this.generator) return;
+  private lastCx = Number.NaN;
+  private lastCz = Number.NaN;
+  /** Whether the last scan left chunks unrequested (throttled). */
+  private unsettled = true;
+
+  /** Requests the nearest missing chunks; returns whether any are still
+   * waiting for a later update. */
+  private requestMissing(pcx: number, pcz: number): boolean {
+    if (!this.generator) return false;
     const missing: { cx: number; cz: number; d2: number }[] = [];
     for (let cx = pcx - this.radius; cx <= pcx + this.radius; cx++) {
       for (let cz = pcz - this.radius; cz <= pcz + this.radius; cz++) {
@@ -137,14 +154,15 @@ export class ChunkStreamer {
         missing.push({ cx, cz, d2: dx * dx + dz * dz });
       }
     }
-    if (missing.length === 0) return;
+    if (missing.length === 0) return false;
     missing.sort((a, b) => a.d2 - b.d2);
     // Don't flood the generator: leave room to re-prioritize as the player moves.
-    const room = Math.min(MAX_REQUESTS_PER_UPDATE, MAX_PENDING - this.pending.size);
-    for (const { cx, cz } of missing.slice(0, Math.max(0, room))) {
+    const room = Math.max(0, Math.min(MAX_REQUESTS_PER_UPDATE, MAX_PENDING - this.pending.size));
+    for (const { cx, cz } of missing.slice(0, room)) {
       this.pending.add(chunkKey(cx, cz));
       this.generator.request(cx, cz);
     }
+    return missing.length > room;
   }
 
   private unloadFar(pcx: number, pcz: number): void {

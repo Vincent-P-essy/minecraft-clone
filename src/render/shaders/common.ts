@@ -139,7 +139,7 @@ export const OUTPUT = /* glsl */ `
     vec3 mapped = acesFilm(hdr * uExposure);
     // A touch of saturation back after the filmic curve.
     float luma = dot(mapped, vec3(0.2126, 0.7152, 0.0722));
-    mapped = mix(vec3(luma), mapped, 1.12);
+    mapped = mix(vec3(luma), mapped, 1.06);
     return linearToSrgb(clamp(mapped, 0.0, 1.0));
   }
 

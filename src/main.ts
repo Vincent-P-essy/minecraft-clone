@@ -66,6 +66,8 @@ declare global {
       flying: () => boolean;
       inventoryOpen: () => boolean;
       settings: () => Record<string, string | number | boolean>;
+      /** Stages a scene for screenshots; not recorded as a player edit. */
+      setBlock: (x: number, y: number, z: number, id: number) => void;
     };
   }
 }
@@ -544,6 +546,11 @@ function boot(): void {
     flying: () => player.isFlying,
     inventoryOpen: () => inventory.isOpen,
     settings: () => ({ ...settings.values }),
+    setBlock: (x, y, z, id) => {
+      if (!(id in BLOCKS) || y < 1 || y >= CHUNK_HEIGHT) return;
+      world.setBlock(x, y, z, id as BlockId);
+      chunkMeshes?.blockChanged(x, y, z, id);
+    },
   };
 
   // Installable and playable offline (production builds only).

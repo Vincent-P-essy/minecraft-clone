@@ -141,7 +141,7 @@ const COMPOSITE_FRAGMENT = /* glsl */ `
   void main() {
     vec2 uv = vUv;
     if (uUnderwater > 0.5) {
-      uv += vec2(sin(uv.y * 34.0 + uTime * 2.1), cos(uv.x * 29.0 + uTime * 1.7)) * 0.0026;
+      uv += vec2(sin(uv.y * 34.0 + uTime * 2.1), cos(uv.x * 29.0 + uTime * 1.7)) * 0.0014;
     }
     vec3 hdr = texture(uScene, uv).rgb;
     hdr += texture(uBloom, uv).rgb * uBloomStrength;

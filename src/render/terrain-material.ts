@@ -140,7 +140,14 @@ const TERRAIN_FRAGMENT = /* glsl */ `
       ) * 0.034;
     }
     vec4 tex = textureGrad(uAtlas, vec3(fract(uv), float(vTile)), duvdx, duvdy);
-    if (tex.a < 0.5) discard;
+    if (tex.a < 0.5) {
+      // Canopies are hollow, so a real hole would show bright sky right
+      // through the tree. Gaps between leaves are drawn as the dark inside
+      // of the crown instead — which also keeps leaf blocks free of
+      // 'discard' and its early-depth-test penalty.
+      if (foliage && vFace != 6) tex.rgb *= 0.28;
+      else discard;
+    }
 
     vec3 n = NORMALS[vFace];
     vec3 albedo = tex.rgb;
@@ -148,7 +155,7 @@ const TERRAIN_FRAGMENT = /* glsl */ `
     // Meadows aren't one flat green: a slow noise warms and cools them.
     if (foliage || vTile == ${TileKind.GRASS_TOP} || vTile == ${TileKind.TALL_GRASS}) {
       float tintNoise = texture(uNoise, world.xz * 0.0031).g;
-      albedo *= mix(vec3(0.86, 0.98, 0.84), vec3(1.12, 1.04, 0.86), tintNoise);
+      albedo *= mix(vec3(0.84, 0.95, 0.84), vec3(1.06, 1.0, 0.86), tintNoise);
     }
 
     float skyL = vLight.x;
@@ -201,7 +208,9 @@ const DEPTH_VERTEX = /* glsl */ `
     }
     vLocal = v.pos;
     vFace = v.cross ? 6 : v.face;
-    vTile = v.tile;
+    // Only plants and glass have holes to cut; everything else (leaf
+    // blocks included) casts a solid shadow and skips the texture fetch.
+    vTile = (v.cross || v.tile == ${TileKind.GLASS}) ? v.tile : -1;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
 `;
@@ -223,7 +232,7 @@ const DEPTH_FRAGMENT = /* glsl */ `
     if (vFace < 2) uv = vLocal.xz;
     else if (vFace < 4 || vFace == 6) uv = vec2(vLocal.x, -vLocal.y);
     else uv = vec2(vLocal.z, -vLocal.y);
-    if (textureLod(uAtlas, vec3(fract(uv), float(vTile)), 0.0).a < 0.5) discard;
+    if (vTile >= 0 && textureLod(uAtlas, vec3(fract(uv), float(vTile)), 0.0).a < 0.5) discard;
     fragColor = vec4(1.0);
   }
 `;
