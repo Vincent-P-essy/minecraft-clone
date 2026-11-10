@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { findPleasantSpawn } from "./spawn";
-import { createCaveSampler, createColumnSampler, SEA_LEVEL } from "./terrain";
+import { treeCandidatesNear } from "./features";
+import { createCaveSampler, createColumnSampler, SEA_LEVEL, treeSpeciesAt } from "./terrain";
 
 describe("findPleasantSpawn", () => {
   it("is deterministic per seed", () => {
@@ -18,6 +19,34 @@ describe("findPleasantSpawn", () => {
       expect(profile.terrainHeight).toBeGreaterThan(SEA_LEVEL + 1);
       expect(profile.terrainHeight).toBeLessThanOrEqual(SEA_LEVEL + 12);
       expect(isCave(Math.floor(spawn.x), profile.terrainHeight, Math.floor(spawn.z))).toBe(false);
+    }
+  });
+
+  it("stands on level ground: the eight columns around the spawn are the same height", () => {
+    for (const seed of [1, 2, 42, 2026, 987654]) {
+      const spawn = findPleasantSpawn(seed);
+      const sample = createColumnSampler(seed);
+      const x = Math.floor(spawn.x);
+      const z = Math.floor(spawn.z);
+      const height = sample(x, z).terrainHeight;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          expect(sample(x + dx, z + dz).terrainHeight).toBe(height);
+        }
+      }
+    }
+  });
+
+  it("leaves the first few steps clear of tree trunks", () => {
+    for (const seed of [1, 2, 42, 505, 2026, 987654]) {
+      const spawn = findPleasantSpawn(seed);
+      const sample = createColumnSampler(seed);
+      const x = Math.floor(spawn.x);
+      const z = Math.floor(spawn.z);
+      for (const tree of treeCandidatesNear(seed, x - 2, x + 2, z - 2, z + 2)) {
+        const near = Math.abs(tree.x - x) <= 2 && Math.abs(tree.z - z) <= 2;
+        if (near) expect(treeSpeciesAt(sample(tree.x, tree.z), tree)).toBeNull();
+      }
     }
   });
 

@@ -48,7 +48,7 @@ const SKY_FRAGMENT = /* glsl */ `
     }
 
     float sunDot = dot(dir, uSunDir);
-    col += uSunColor * smoothstep(0.99935, 0.99972, sunDot) * 24.0;
+    col += uSunColor * smoothstep(0.99935, 0.99972, sunDot) * 14.0;
 
     float moonDot = dot(dir, uMoonDir);
     float moon = smoothstep(0.99915, 0.9995, moonDot);

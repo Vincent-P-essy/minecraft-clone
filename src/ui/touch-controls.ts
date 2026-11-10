@@ -23,6 +23,7 @@ export interface TouchInput {
   readonly right: number;
   readonly jump: boolean;
   readonly sprint: boolean;
+  readonly descend: boolean;
 }
 
 /** Maps a thumb offset (pixels from the joystick center) to a movement
@@ -57,6 +58,9 @@ export interface TouchControlHandlers {
   readonly onLook: (pixelsX: number, pixelsY: number) => void;
   readonly onBreak: () => void;
   readonly onPlace: () => void;
+  readonly onPause: () => void;
+  readonly onInventory: () => void;
+  readonly onToggleFly: () => void;
 }
 
 interface StickTouch {
@@ -81,10 +85,14 @@ export class TouchControls {
   private readonly stickBase: HTMLDivElement;
   private readonly stickKnob: HTMLDivElement;
   private readonly buttons: HTMLDivElement;
+  private readonly topBar: HTMLDivElement;
+  private readonly descendButton: HTMLDivElement;
+  private readonly flyButton: HTMLDivElement;
   private readonly touches = new Map<number, ActiveTouch>();
 
   private move: MoveVector = { forward: 0, right: 0, sprint: false };
   private jumpHeld = false;
+  private descendHeld = false;
 
   constructor(root: HTMLElement, handlers: TouchControlHandlers) {
     this.handlers = handlers;
@@ -96,9 +104,28 @@ export class TouchControls {
     this.stickKnob.className = "touch-stick-knob";
     this.stickBase.appendChild(this.stickKnob);
 
+    this.descendButton = this.makeButton("touch-descend", "⤓", {
+      press: () => {
+        this.descendHeld = true;
+        this.emit();
+      },
+      release: () => {
+        this.descendHeld = false;
+        this.emit();
+      },
+    });
+    this.descendButton.style.display = "none";
+    this.flyButton = this.makeButton("touch-fly", "✈", {
+      press: () => {
+        if (this.handlers.isActive()) this.handlers.onToggleFly();
+      },
+    });
+
     this.buttons = document.createElement("div");
     this.buttons.className = "touch-buttons";
     this.buttons.append(
+      this.flyButton,
+      this.descendButton,
       this.makeButton("touch-place", "▣", {
         press: () => {
           if (this.handlers.isActive()) this.handlers.onPlace();
@@ -116,7 +143,22 @@ export class TouchControls {
       }),
     );
 
-    root.append(this.stickBase, this.buttons);
+    this.topBar = document.createElement("div");
+    this.topBar.className = "touch-top";
+    this.topBar.append(
+      this.makeButton("touch-inventory", "▦", {
+        press: () => {
+          if (this.handlers.isActive()) this.handlers.onInventory();
+        },
+      }),
+      this.makeButton("touch-pause", "Ⅱ", {
+        press: () => {
+          if (this.handlers.isActive()) this.handlers.onPause();
+        },
+      }),
+    );
+
+    root.append(this.stickBase, this.buttons, this.topBar);
 
     root.addEventListener("pointerdown", this.onPointerDown, { passive: false });
     root.addEventListener("pointermove", this.onPointerMove, { passive: false });
@@ -130,13 +172,22 @@ export class TouchControls {
    * started). Buttons hide when idle so the menu isn't cluttered. */
   setVisible(visible: boolean): void {
     this.buttons.style.display = visible ? "flex" : "none";
+    this.topBar.style.display = visible ? "flex" : "none";
     if (!visible) {
       this.stickBase.style.display = "none";
       this.touches.clear();
       this.jumpHeld = false;
+      this.descendHeld = false;
       this.move = { forward: 0, right: 0, sprint: false };
       this.emit();
     }
+  }
+
+  /** Flight shows a "descend" button and lights up the wing. */
+  setFlying(flying: boolean): void {
+    this.descendButton.style.display = flying ? "flex" : "none";
+    this.flyButton.classList.toggle("active", flying);
+    if (!flying) this.descendHeld = false;
   }
 
   private makeButton(
@@ -167,7 +218,7 @@ export class TouchControls {
     if (e.pointerType === "mouse" || !this.handlers.isActive()) return;
     // Taps on the hotbar (or the buttons, which also stop propagation) must
     // reach their own handlers, not the movement/look surfaces.
-    if (e.target instanceof Element && e.target.closest("#hotbar")) return;
+    if (e.target instanceof Element && e.target.closest("#hotbar, .panel, #overlay")) return;
     e.preventDefault();
     if (e.clientX < window.innerWidth * 0.45) {
       // Left zone → floating movement joystick, centered where the thumb lands.
@@ -237,6 +288,7 @@ export class TouchControls {
       right: this.move.right,
       jump: this.jumpHeld,
       sprint: this.move.sprint,
+      descend: this.descendHeld,
     });
   }
 }

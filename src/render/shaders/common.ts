@@ -90,7 +90,7 @@ export const ATMOSPHERE = /* glsl */ `
     float toSun = max(dot(dir, uSunDir), 0.0);
     // A broad warm lobe plus a tighter one hugging the sun.
     float lowBand = pow(1.0 - up, 2.0);
-    col += uSunGlow * (pow(toSun, 6.0) * 0.55 * lowBand + pow(toSun, 48.0) * 0.6);
+    col += uSunGlow * (pow(toSun, 6.0) * 0.42 * lowBand + pow(toSun, 48.0) * 0.38);
     // Below the horizon the "sky" is distant haze: darker, flatter.
     float below = clamp(-dir.y * 4.0, 0.0, 1.0);
     return mix(col, uSkyHorizon * 0.72, below);

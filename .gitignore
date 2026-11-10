@@ -28,3 +28,10 @@ dist-ssr
 
 # Visual-check harness output
 visual-check/
+
+# Desktop and mobile shells (each has its own package)
+desktop/node_modules
+desktop/release
+mobile/node_modules
+mobile/android
+mobile/ios

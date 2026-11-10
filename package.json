@@ -1,7 +1,7 @@
 {
-  "name": "minecraft-clone",
+  "name": "lumenwild",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,10 @@
     "lint": "eslint .",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "build:native": "tsc -b && BUILD_TARGET=native vite build",
+    "check": "npm run lint && npm run format && npm run typecheck && npm run test",
+    "e2e": "node scripts/visual-check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -31,5 +34,6 @@
   "dependencies": {
     "simplex-noise": "^4.0.3",
     "three": "^0.185.1"
-  }
+  },
+  "description": "An endless voxel world of light \u2014 explore, dig and build, in the browser, on desktop and on phones."
 }

@@ -1,0 +1,24 @@
+{
+  "name": "lumenwild-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android and iOS shells for Lumenwild (Capacitor).",
+  "author": "Vincent Plessy",
+  "scripts": {
+    "build:web": "cd .. && BUILD_TARGET=native npm run build",
+    "sync": "npm run build:web && cap sync",
+    "android:add": "cap add android",
+    "android:open": "cap open android",
+    "android:apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "ios:add": "cap add ios",
+    "ios:open": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

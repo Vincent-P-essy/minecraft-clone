@@ -1,0 +1,19 @@
+{
+  "appId": "com.lumenwild.game",
+  "appName": "Lumenwild",
+  "webDir": "../dist",
+  "backgroundColor": "#05080d",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  }
+}

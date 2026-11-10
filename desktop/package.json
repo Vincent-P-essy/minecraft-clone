@@ -1,0 +1,53 @@
+{
+  "name": "lumenwild-desktop",
+  "productName": "Lumenwild",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop shell for Lumenwild (Windows, macOS, Linux).",
+  "author": "Vincent Plessy",
+  "main": "main.cjs",
+  "scripts": {
+    "build:web": "cd .. && BUILD_TARGET=native npm run build",
+    "start": "npm run build:web && electron .",
+    "dist": "npm run build:web && electron-builder",
+    "dist:dir": "npm run build:web && electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.lumenwild.game",
+    "productName": "Lumenwild",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "app"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "../public/icons/icon-512.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.adventure-games",
+      "icon": "../public/icons/icon-512.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game",
+      "icon": "../public/icons/icon-512.png"
+    }
+  }
+}

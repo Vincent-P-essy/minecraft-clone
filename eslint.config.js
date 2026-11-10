@@ -5,7 +5,16 @@ import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
 export default defineConfig(
-  { ignores: ["dist/**"] },
+  {
+    ignores: [
+      "dist/**",
+      "desktop/node_modules/**",
+      "desktop/release/**",
+      "mobile/node_modules/**",
+      "mobile/android/**",
+      "mobile/ios/**",
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
@@ -42,7 +51,31 @@ export default defineConfig(
         PointerEvent: "readonly",
         getComputedStyle: "readonly",
         Image: "readonly",
+        Event: "readonly",
+        navigator: "readonly",
       },
+    },
+  },
+  {
+    // The Electron main/preload scripts: CommonJS, Node globals.
+    files: ["desktop/**/*.cjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        require: "readonly",
+        module: "readonly",
+        __dirname: "readonly",
+        process: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        Response: "readonly",
+        Headers: "readonly",
+        decodeURIComponent: "readonly",
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
   prettier,

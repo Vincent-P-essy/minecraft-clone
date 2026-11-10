@@ -2,38 +2,53 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#87ceeb" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0d1420" />
     <meta
       name="description"
-      content="A Minecraft-inspired voxel world in the browser: infinite procedural terrain, break and place blocks, no install."
+      content="Lumenwild — an endless voxel world of light. Explore, dig and build across forests, deserts, peaks and glowing caves, on desktop or phone."
     />
-    <title>minecraft-clone</title>
+    <title>Lumenwild</title>
   </head>
   <body>
     <div id="app">
       <div id="crosshair" aria-hidden="true"></div>
       <div id="hotbar"></div>
       <div id="overlay">
-        <div id="overlay-content">
-          <h1>minecraft-clone</h1>
-          <p class="controls-desktop">
-            WASD to move &middot; mouse to look &middot; space to jump<br />
-            left click breaks a block &middot; right click places one<br />
-            1-9 or scroll to pick a block
-          </p>
-          <p class="controls-touch">
-            left thumb to move &middot; drag the right side to look<br />
-            tap to break &middot; the buttons jump and place<br />
-            tap a slot to pick a block
-          </p>
-          <button id="play-button" type="button">Tap to play</button>
+        <div id="overlay-content" class="menu">
+          <div class="menu-screen" data-screen="main">
+            <h1 class="title">Lumenwild</h1>
+            <p class="tagline">An endless world of light, built block by block.</p>
+            <button id="play-button" class="btn primary" type="button">Play</button>
+            <div class="menu-row">
+              <button id="settings-button" class="btn" type="button">Settings</button>
+              <button id="world-button" class="btn" type="button">Worlds</button>
+              <button id="fullscreen-button" class="btn" type="button">Fullscreen</button>
+            </div>
+            <p class="hint controls-desktop">
+              <kbd>WASD</kbd> move &middot; <kbd>Space</kbd> jump (twice to fly) &middot;
+              <kbd>Shift</kbd> sprint<br />
+              <kbd>Left click</kbd> break &middot; <kbd>Right click</kbd> place &middot;
+              <kbd>Middle click</kbd> pick<br />
+              <kbd>E</kbd> blocks &middot; <kbd>1</kbd>-<kbd>9</kbd> or scroll to choose &middot;
+              <kbd>F3</kbd> stats
+            </p>
+            <p class="hint controls-touch">
+              Left thumb moves &middot; drag the right side to look<br />
+              Tap to break &middot; the buttons jump, place and fly<br />
+              Tap a slot to choose a block
+            </p>
+            <p class="version"></p>
+          </div>
         </div>
       </div>
     </div>

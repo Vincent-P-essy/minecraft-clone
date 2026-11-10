@@ -100,7 +100,7 @@ export function environmentAt(timeSeconds: number): Environment {
   skyHorizon = mix3(skyHorizon, HORIZON_DUSK, twilight * 0.85);
 
   const sunTint = mix3(SUN_LOW, SUN_HIGH, smoothstep(0.02, 0.42, elevation));
-  const sunPower = 2.6 * smoothstep(-0.03, 0.22, elevation);
+  const sunPower = 2.3 * smoothstep(-0.03, 0.22, elevation);
   const moonPower = 0.26 * smoothstep(0.0, 0.25, moonDir[1]);
 
   const sunUp = elevation > -0.03;
@@ -108,16 +108,16 @@ export function environmentAt(timeSeconds: number): Environment {
   const lightColor = sunUp ? scale3(sunTint, sunPower) : scale3(MOON_LIGHT, moonPower);
   const lightElevation = Math.abs(lightDir[1]);
 
-  const sunGlow = add3(scale3(HORIZON_DUSK, twilight * 1.5), scale3(SUN_HIGH, day * 0.22));
+  const sunGlow = add3(scale3(HORIZON_DUSK, twilight * 1.1), scale3(SUN_HIGH, day * 0.2));
 
   // Skylight is blue, but surfaces lit only by it shouldn't turn teal:
-  // pull the ambient term halfway back toward neutral.
+  // pull the ambient term most of the way back toward neutral.
   const rawAmbient = add3(
     add3(scale3(skyZenith, 0.7), scale3(skyHorizon, 0.3)),
     scale3(MOON_LIGHT, 0.035 * night),
   );
   const ambientLuma = rawAmbient[0] * 0.2126 + rawAmbient[1] * 0.7152 + rawAmbient[2] * 0.0722;
-  const ambientSky = mix3([ambientLuma, ambientLuma, ambientLuma], rawAmbient, 0.5);
+  const ambientSky = mix3([ambientLuma, ambientLuma, ambientLuma], rawAmbient, 0.3);
   const ambientGround = add3(scale3(ambientSky, 0.32), scale3(sunTint, 0.07 * day));
 
   return {
@@ -135,6 +135,6 @@ export function environmentAt(timeSeconds: number): Environment {
     night,
     starVisibility: smoothstep(0.35, 0.95, night),
     shadowStrength: smoothstep(0.04, 0.2, lightElevation),
-    exposure: 0.92 + night * 0.85,
+    exposure: 0.86 + night * 0.9,
   };
 }

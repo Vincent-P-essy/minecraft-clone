@@ -51,6 +51,12 @@ export class EditStore {
     }
   }
 
+  /** Forgets every edit (the world returns to how the seed made it). */
+  clear(): void {
+    this.edits.clear();
+    this.save();
+  }
+
   get editedChunkCount(): number {
     return this.edits.size;
   }

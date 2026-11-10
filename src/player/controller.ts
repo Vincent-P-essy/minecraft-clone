@@ -205,7 +205,7 @@ export class PlayerController {
       if (locked) {
         if (this.lockWatchdog) clearTimeout(this.lockWatchdog);
         this.enterMode("pointer");
-      } else if (this.controlMode === "pointer") {
+      } else if (this.controlMode === "pointer" && !this.uiOpen) {
         this.enterMode("idle");
       }
     });
@@ -304,9 +304,46 @@ export class PlayerController {
     }
   }
 
+  private uiOpen = false;
+
+  /** Frees the pointer for an in-game panel (the inventory) without
+   * pausing: the world keeps running, the player just stops steering. */
+  openUi(): void {
+    if (this.controlMode === "idle" || this.uiOpen) return;
+    this.uiOpen = true;
+    this.inputEnabled = false;
+    this.pressed.clear();
+    if (this.controlMode === "pointer") document.exitPointerLock();
+  }
+
+  /** Back from a panel to the game. Must be called from a user gesture
+   * (a key press or click) so the browser will re-grant pointer lock. */
+  closeUi(): void {
+    if (!this.uiOpen) return;
+    this.uiOpen = false;
+    this.inputEnabled = true;
+    if (this.controlMode !== "pointer") return;
+    const fallBack = (): void => {
+      if (document.pointerLockElement !== this.domElement) this.controlMode = "drag";
+    };
+    try {
+      const result: unknown = this.domElement.requestPointerLock();
+      if (result instanceof Promise) result.catch(fallBack);
+    } catch {
+      fallBack();
+    }
+    setTimeout(fallBack, POINTER_LOCK_WATCHDOG_MS);
+  }
+
+  get isUiOpen(): boolean {
+    return this.uiOpen;
+  }
+
   /** Leave play and show the menu (pause button on touch, Escape on desktop). */
   releaseControl(): void {
-    if (this.controlMode === "pointer") document.exitPointerLock();
+    this.uiOpen = false;
+    this.inputEnabled = true;
+    if (document.pointerLockElement === this.domElement) document.exitPointerLock();
     this.enterMode("idle");
   }
 

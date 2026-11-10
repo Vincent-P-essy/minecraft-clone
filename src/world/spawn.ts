@@ -1,4 +1,5 @@
-import { createCaveSampler, createColumnSampler, SEA_LEVEL } from "./terrain";
+import { treeCandidatesNear } from "./features";
+import { createCaveSampler, createColumnSampler, SEA_LEVEL, treeSpeciesAt } from "./terrain";
 
 const MAX_SPAWN_HEIGHT = SEA_LEVEL + 12;
 const SEARCH_STEP = 8;
@@ -10,8 +11,8 @@ export interface SpawnPoint {
 }
 
 /** A deterministic, *pleasant* place to start: a grassy column at a gentle
- * height, not a desert, not a windswept snow peak, not the roof of a cave
- * about to swallow the player. Scans outward from the origin in growing
+ * height, level underfoot and clear of tree trunks, not a desert, not a
+ * windswept snow peak, not the roof of a cave about to swallow the player. Scans outward from the origin in growing
  * rings so the same seed always spawns in the same spot. Falls back to
  * (8, 8) if the seed is somehow all ocean and dunes within the search
  * limit. */
@@ -27,10 +28,34 @@ export function findPleasantSpawn(seed: number): SpawnPoint {
       if (profile.terrainHeight <= SEA_LEVEL + 1) continue; // beach or ocean
       if (profile.terrainHeight > MAX_SPAWN_HEIGHT) continue; // steep highlands
       if (isCave(x, profile.terrainHeight, z)) continue; // cave mouth underfoot
+      // Level ground all around: the first steps shouldn't be into a wall.
+      if (!isLevel(sample, x, z, profile.terrainHeight)) continue;
+      // ...or straight into a tree trunk.
+      const crowded = treeCandidatesNear(seed, x - 2, x + 2, z - 2, z + 2).some(
+        (tree) =>
+          Math.abs(tree.x - x) <= 2 &&
+          Math.abs(tree.z - z) <= 2 &&
+          treeSpeciesAt(sample(tree.x, tree.z), tree) !== null,
+      );
+      if (crowded) continue;
       return { x: x + 0.5, z: z + 0.5 };
     }
   }
   return { x: 8, z: 8 };
+}
+
+function isLevel(
+  sample: (x: number, z: number) => { terrainHeight: number },
+  x: number,
+  z: number,
+  height: number,
+): boolean {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (sample(x + dx, z + dz).terrainHeight !== height) return false;
+    }
+  }
+  return true;
 }
 
 function ringCoordinates(radius: number): [number, number][] {

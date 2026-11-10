@@ -90,7 +90,7 @@ const ADAPT_FAST_MS = 11.5;
 
 const WATER_SHALLOW: Vec3Tuple = [0.07, 0.36, 0.4];
 const WATER_DEEP: Vec3Tuple = [0.012, 0.085, 0.2];
-const BLOCK_LIGHT: Vec3Tuple = [1.9, 1.15, 0.52];
+const BLOCK_LIGHT: Vec3Tuple = [1.55, 1.2, 0.86];
 const CLOUD_DRIFT: readonly [number, number] = [3.2, 1.1]; // blocks per second
 
 function setVec(uniform: THREE.IUniform | undefined, v: Vec3Tuple): void {
