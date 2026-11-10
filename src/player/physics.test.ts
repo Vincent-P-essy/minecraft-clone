@@ -21,6 +21,9 @@ import {
   WATER_MOVE_FACTOR,
   WATER_TERMINAL_VELOCITY,
   waterRegime,
+  FLY_SPEED,
+  FLY_SPRINT_MULTIPLIER,
+  stepFlight,
 } from "./physics";
 
 /** Solid everywhere at or below `groundY`, air above — an infinite flat floor. */
@@ -347,5 +350,74 @@ describe("findGroundHeight", () => {
 
   it("returns the scan start when nothing solid is found", () => {
     expect(findGroundHeight(0, 0, 50, () => false)).toBe(50);
+  });
+});
+
+describe("stepFlight", () => {
+  const still: PlayerPhysicsState = {
+    position: { x: 0.5, y: 50, z: 0.5 },
+    velocity: { x: 0, y: 0, z: 0 },
+    onGround: false,
+  };
+  const open = (): boolean => false;
+  const fly = (
+    input: { forward?: number; right?: number; up?: number; sprint?: boolean },
+    seconds: number,
+    isSolid: (x: number, y: number, z: number) => boolean = open,
+  ): PlayerPhysicsState => {
+    let state = still;
+    for (let t = 0; t < seconds * 120; t++) {
+      state = stepFlight(
+        state,
+        { forward: 0, right: 0, up: 0, yaw: 0, ...input },
+        1 / 120,
+        isSolid,
+      );
+    }
+    return state;
+  };
+
+  it("hovers: no input, no gravity, no drift", () => {
+    const after = fly({}, 2);
+    expect(after.position).toEqual(still.position);
+  });
+
+  it("climbs and descends on the vertical input", () => {
+    expect(fly({ up: 1 }, 1).position.y).toBeGreaterThan(55);
+    expect(fly({ up: -1 }, 1).position.y).toBeLessThan(45);
+  });
+
+  it("eases up to cruising speed instead of snapping to it", () => {
+    const first = stepFlight(still, { forward: 1, right: 0, up: 0, yaw: 0 }, 1 / 120, open);
+    expect(Math.abs(first.velocity.z)).toBeLessThan(FLY_SPEED * 0.2);
+    expect(Math.abs(fly({ forward: 1 }, 2).velocity.z)).toBeCloseTo(FLY_SPEED, 1);
+  });
+
+  it("sprinting flies faster", () => {
+    const cruise = Math.abs(fly({ forward: 1 }, 2).velocity.z);
+    const sprint = Math.abs(fly({ forward: 1, sprint: true }, 2).velocity.z);
+    expect(sprint).toBeCloseTo(cruise * FLY_SPRINT_MULTIPLIER, 1);
+  });
+
+  it("coasts to a stop when the input is released", () => {
+    let state = fly({ forward: 1 }, 2);
+    for (let t = 0; t < 240; t++) {
+      state = stepFlight(state, { forward: 0, right: 0, up: 0, yaw: 0 }, 1 / 120, open);
+    }
+    expect(Math.abs(state.velocity.z)).toBeLessThan(0.01);
+  });
+
+  it("still collides with the world: a ceiling stops the climb", () => {
+    const ceiling = (_x: number, y: number): boolean => y >= 54;
+    const after = fly({ up: 1 }, 3, ceiling);
+    expect(after.position.y + PLAYER_HEIGHT).toBeLessThanOrEqual(54 + 1e-3);
+    expect(after.position.y).toBeGreaterThan(51);
+  });
+
+  it("lands on a floor when flown down into it", () => {
+    const floor = (_x: number, y: number): boolean => y < 48;
+    const after = fly({ up: -1 }, 2, floor);
+    expect(after.position.y).toBeCloseTo(48, 2);
+    expect(after.onGround).toBe(true);
   });
 });
