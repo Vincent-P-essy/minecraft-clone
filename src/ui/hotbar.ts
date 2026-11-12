@@ -56,8 +56,7 @@ export class Hotbar {
       "wheel",
       (e) => {
         if (!this.enabled) return;
-        const direction = e.deltaY > 0 ? 1 : -1;
-        this.select((this.selectedIndex + direction + HOTBAR_SLOTS) % HOTBAR_SLOTS);
+        this.cycle(e.deltaY > 0 ? 1 : -1);
       },
       { passive: true },
     );
@@ -80,6 +79,11 @@ export class Hotbar {
     this.selectedIndex = index;
     this.applySelectionStyle();
     this.onChange?.();
+  }
+
+  /** Moves the selection one slot left (-1) or right (+1), wrapping. */
+  cycle(direction: -1 | 1): void {
+    this.select((this.selectedIndex + direction + HOTBAR_SLOTS) % HOTBAR_SLOTS);
   }
 
   /** Puts a block in the selected slot (from the inventory). */

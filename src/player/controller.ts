@@ -573,6 +573,15 @@ export class PlayerController {
     this.syncCamera(alpha);
   }
 
+  /** The current view-bob offset, so things attached to the view (the
+   * held block) can sway with the player's step. */
+  get bob(): { x: number; y: number } {
+    return {
+      x: Math.cos(this.bobPhase) * 0.035 * this.bobAmount,
+      y: Math.sin(this.bobPhase * 2) * 0.05 * this.bobAmount - this.landDip,
+    };
+  }
+
   /** Whether the camera itself is under water (drives the underwater look). */
   get eyeInWater(): boolean {
     const c = this.camera.position;

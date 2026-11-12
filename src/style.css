@@ -139,6 +139,16 @@ canvas {
   z-index: 1;
 }
 
+/* Photo mode (F1): nothing on screen but the world. */
+#app.hud-hidden #crosshair,
+#app.hud-hidden #hotbar,
+#app.hud-hidden #toast,
+#app.hud-hidden #fps,
+#app.hud-hidden .touch-buttons,
+#app.hud-hidden .touch-top {
+  display: none !important;
+}
+
 /* --- Toast and stats --- */
 #toast {
   position: fixed;

@@ -2,9 +2,11 @@ import "./style.css";
 import * as THREE from "three";
 import { SoundEngine } from "./audio/sound";
 import { GAME_NAME } from "./branding";
+import { GamepadInput } from "./input/gamepad";
 import { ChunkMeshManager } from "./render/chunk-mesh-manager";
 import { CpuRenderer } from "./render/cpu-renderer";
 import { environmentAt } from "./render/environment";
+import { HeldBlock } from "./render/held-block";
 import { Particles } from "./render/particles";
 import { QUALITY_PROFILES, WorldRenderer } from "./render/renderer";
 import { DAY_LENGTH_SECONDS, STARTUP_PHASE, skyStateAt } from "./render/sky";
@@ -158,6 +160,7 @@ function boot(): void {
   let cpu: CpuRenderer | null = null;
   let chunkMeshes: ChunkMeshManager | null = null;
   let particles: Particles | null = null;
+  let heldBlock: HeldBlock | null = null;
   let highlight: THREE.LineSegments | null = null;
   try {
     const renderer = new WorldRenderer(
@@ -175,10 +178,15 @@ function boot(): void {
     const directOutput = (): boolean =>
       !QUALITY_PROFILES[renderer.qualityLevel].post || !renderer.supportsPost;
     const sparks = new Particles(renderer.scene, SEED, directOutput());
+    // The camera carries the held block, so it has to be part of the scene.
+    renderer.scene.add(renderer.camera);
+    const hand = new HeldBlock(renderer.camera, renderer.uniforms, directOutput());
     renderer.onMaterialsChanged = () => {
       meshes.setMaterials({ terrain: renderer.terrainMaterial, water: renderer.waterMaterial });
       sparks.setDirect(directOutput());
+      hand.setDirect(directOutput());
     };
+    heldBlock = hand;
     highlight = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
       new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.75 }),
@@ -267,6 +275,7 @@ function boot(): void {
   );
   interaction.onEdit = (edit) => {
     editStore.record(edit.x, edit.y, edit.z, edit.id);
+    heldBlock?.use();
     if (edit.id === BlockId.AIR) {
       sound.breakBlock(edit.previous);
       particles?.burst(edit.x, edit.y, edit.z, edit.previous);
@@ -277,6 +286,12 @@ function boot(): void {
   interaction.onPick = (id) => {
     hotbar.pick(id);
   };
+
+  /** Photo mode: everything but the world is hidden. */
+  let hudHidden = false;
+  let wantScreenshot = false;
+  const gamepad = new GamepadInput();
+  let padDriving = false;
 
   // ---- time of day ----
   let gameTime = saved?.time ?? STARTUP_PHASE * DAY_LENGTH_SECONDS;
@@ -442,6 +457,14 @@ function boot(): void {
     } else if (e.code === "F3") {
       e.preventDefault();
       settings.set("showStats", !settings.values.showStats);
+    } else if (e.code === "F1") {
+      // Photo mode: nothing on screen but the world.
+      e.preventDefault();
+      hudHidden = !hudHidden;
+      app.classList.toggle("hud-hidden", hudHidden);
+    } else if (e.code === "F2") {
+      e.preventDefault();
+      wantScreenshot = true;
     }
   });
 
@@ -579,6 +602,40 @@ function boot(): void {
     }
     hotbar.enabled = player.isActive && !inventory.isOpen;
 
+    const pad = gamepad.poll(dt);
+    if (pad) {
+      if (pad.pause) {
+        if (player.isActive) player.releaseControl();
+        else player.requestControl();
+      }
+      if (player.isActive) {
+        if (pad.inventory) setInventory(!inventory.isOpen);
+        if (!inventory.isOpen) {
+          // Only take over movement while the pad is actually in use, so
+          // it never fights the keyboard or the touch joystick.
+          if (pad.active || padDriving) {
+            padDriving = pad.active;
+            player.setExternalInput(
+              pad.active
+                ? {
+                    forward: pad.forward,
+                    right: pad.right,
+                    jump: pad.jump,
+                    sprint: pad.sprint,
+                    descend: pad.descend,
+                  }
+                : null,
+            );
+          }
+          if (pad.lookX !== 0 || pad.lookY !== 0) player.lookBy(pad.lookX, pad.lookY);
+          if (pad.breakBlock) interaction.breakTargetedBlock();
+          if (pad.placeBlock) interaction.placeTargetedBlock();
+          if (pad.hotbarStep !== 0) hotbar.cycle(pad.hotbarStep);
+          if (pad.toggleFlight) player.toggleFlight();
+        }
+      }
+    }
+
     streamer.update(player.position.x, player.position.z);
     player.update(dt);
 
@@ -624,6 +681,17 @@ function boot(): void {
 
     if (webgl) {
       const open = 1 - caveFactor;
+      heldBlock?.setBlock(hotbar.selectedBlock);
+      heldBlock?.update(
+        dt,
+        player.bob,
+        [
+          environment.ambientSky[0] * open + environment.lightColor[0] * 0.45 * open + 0.16,
+          environment.ambientSky[1] * open + environment.lightColor[1] * 0.45 * open + 0.15,
+          environment.ambientSky[2] * open + environment.lightColor[2] * 0.45 * open + 0.13,
+        ],
+        player.isActive && !hudHidden,
+      );
       particles?.update(
         dt,
         player.position,
@@ -641,6 +709,21 @@ function boot(): void {
       webgl.setCaveFactor(caveFactor);
       webgl.setEnvironment(environment, time / 1000, underwater);
       webgl.render();
+      if (wantScreenshot) {
+        // The drawing buffer is only readable in the task that drew it.
+        wantScreenshot = false;
+        webgl.domElement.toBlob((blob) => {
+          if (!blob) return;
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = `${GAME_NAME.toLowerCase()}-${Date.now().toString()}.png`;
+          link.click();
+          setTimeout(() => {
+            URL.revokeObjectURL(link.href);
+          }, 5000);
+        }, "image/png");
+        hud.announce("Screenshot saved");
+      }
     } else if (cpu) {
       cpu.applySky(skyStateAt(clock));
       cpu.render(clock);
