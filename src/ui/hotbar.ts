@@ -24,12 +24,19 @@ export class Hotbar {
   private readonly slots: BlockId[];
   private readonly elements: HTMLElement[] = [];
   private selectedIndex = 0;
+  private readonly blockName: (name: string) => string;
   /** Fired when the selection or a slot's contents change. */
   onChange: (() => void) | undefined;
   /** Set false while a menu is open so keys and scroll don't reach it. */
   enabled = true;
 
-  constructor(container: HTMLElement, atlas: HTMLCanvasElement, initial?: BlockId[] | null) {
+  constructor(
+    container: HTMLElement,
+    atlas: HTMLCanvasElement,
+    initial?: BlockId[] | null,
+    blockName: (name: string) => string = (name) => name,
+  ) {
+    this.blockName = blockName;
     this.container = container;
     this.atlas = atlas;
     this.slots = initial ? [...initial] : [...PLACEABLE_BLOCKS];
@@ -71,7 +78,7 @@ export class Hotbar {
     key.className = "hotbar-key";
     key.textContent = (index + 1).toString();
     slot.append(key, renderBlockIcon(this.atlas, block, ICON_SIZE));
-    slot.title = BLOCKS[block].name;
+    slot.title = this.blockName(BLOCKS[block].name);
   }
 
   select(index: number): void {

@@ -1,4 +1,5 @@
-import { GAME_NAME, GAME_TAGLINE, GAME_VERSION } from "../branding";
+import { GAME_NAME, GAME_VERSION } from "../branding";
+import { type LanguageSetting, type TextKey, type Translator } from "../i18n";
 import { QUALITY_LEVELS, type QualityLevel } from "../render/renderer";
 import { FOV_RANGE, type SettingsStore, VIEW_DISTANCE_RANGE } from "../settings";
 
@@ -26,6 +27,9 @@ export interface MenuHandlers {
   readonly canUsePost: boolean;
   readonly seed: number;
   readonly touch: boolean;
+  readonly t: Translator;
+  /** The language setting changed: the page reloads to apply it. */
+  readonly onLanguageChange: () => void;
 }
 
 type Screen = "main" | "settings" | "world";
@@ -50,11 +54,13 @@ export class Menu {
   private readonly handlers: MenuHandlers;
   private readonly screens = new Map<Screen, HTMLElement>();
   private readonly playButton: HTMLButtonElement | null;
+  private readonly t: Translator;
 
   constructor(root: HTMLElement, settings: SettingsStore, handlers: MenuHandlers) {
     this.root = root;
     this.settings = settings;
     this.handlers = handlers;
+    this.t = handlers.t;
     this.playButton = root.querySelector<HTMLButtonElement>("#play-button");
 
     const main = root.querySelector<HTMLElement>('[data-screen="main"]');
@@ -62,10 +68,19 @@ export class Menu {
       this.screens.set("main", main);
       const title = main.querySelector(".title");
       if (title) title.textContent = GAME_NAME;
-      const tagline = main.querySelector(".tagline");
-      if (tagline) tagline.textContent = GAME_TAGLINE;
+      // Fill in the static shell's text in the player's language.
+      for (const node of main.querySelectorAll<HTMLElement>("[data-i18n]")) {
+        node.textContent = this.t(node.dataset.i18n as TextKey);
+      }
+      for (const node of main.querySelectorAll<HTMLElement>("[data-i18n-html]")) {
+        // Trusted, static markup from the string table (it carries <kbd>).
+        node.innerHTML = this.t(node.dataset.i18nHtml as TextKey);
+      }
+      if (this.playButton) this.playButton.textContent = this.t("play");
       const version = main.querySelector(".version");
-      if (version) version.textContent = `v${GAME_VERSION} · seed ${handlers.seed.toString()}`;
+      if (version) {
+        version.textContent = this.t("version", { version: GAME_VERSION, seed: handlers.seed });
+      }
       main.querySelector("#settings-button")?.addEventListener("click", () => {
         this.show("settings");
       });
@@ -89,7 +104,7 @@ export class Menu {
 
   /** After the first start the big button resumes instead of starting. */
   markStarted(): void {
-    if (this.playButton) this.playButton.textContent = "Resume";
+    if (this.playButton) this.playButton.textContent = this.t("resume");
   }
 
   show(screen: Screen): void {
@@ -161,14 +176,14 @@ export class Menu {
   private buildSettings(): HTMLElement {
     const screen = el("div", "menu-screen");
     screen.dataset.screen = "settings";
-    screen.append(el("h2", undefined, "Settings"));
+    screen.append(el("h2", undefined, this.t("settings")));
 
     const quality = el("div", "segmented");
     const labels: Record<QualityLevel, string> = {
-      low: "Low",
-      medium: "Medium",
-      high: "High",
-      ultra: "Ultra",
+      low: this.t("qualityLow"),
+      medium: this.t("qualityMedium"),
+      high: this.t("qualityHigh"),
+      ultra: this.t("qualityUltra"),
     };
     const buttons: HTMLButtonElement[] = [];
     const refresh = (): void => {
@@ -192,33 +207,50 @@ export class Menu {
     }
     refresh();
     const qualityRow = el("div", "setting-row");
-    qualityRow.append(el("span", "setting-name", "Graphics"), quality);
+    qualityRow.append(el("span", "setting-name", this.t("graphics")), quality);
 
     const list = el("div", "settings-list");
+    const language = el("select");
+    for (const [value, label] of [
+      ["auto", this.t("languageAuto")],
+      ["en", "English"],
+      ["fr", "Français"],
+    ] as const) {
+      const option = el("option", undefined, label);
+      option.value = value;
+      option.selected = this.settings.values.language === value;
+      language.appendChild(option);
+    }
+    language.addEventListener("change", () => {
+      this.settings.set("language", language.value as LanguageSetting);
+      this.handlers.onLanguageChange();
+    });
+
     list.append(
       qualityRow,
       this.slider(
-        "View distance",
+        this.t("viewDistance"),
         "viewDistance",
         VIEW_DISTANCE_RANGE.min,
         VIEW_DISTANCE_RANGE.max,
         1,
-        (v) => `${v.toString()} chunks`,
+        (v) => this.t("chunks", { n: v }),
       ),
+      this.slider(this.t("fov"), "fov", FOV_RANGE.min, FOV_RANGE.max, 1, (v) => `${v.toString()}°`),
+      this.slider(this.t("sensitivity"), "sensitivity", 0.2, 3, 0.05, (v) => `${v.toFixed(2)}×`),
       this.slider(
-        "Field of view",
-        "fov",
-        FOV_RANGE.min,
-        FOV_RANGE.max,
+        this.t("volume"),
+        "volume",
+        0,
         1,
-        (v) => `${v.toString()}°`,
+        0.05,
+        (v) => `${Math.round(v * 100).toString()}%`,
       ),
-      this.slider("Look sensitivity", "sensitivity", 0.2, 3, 0.05, (v) => `${v.toFixed(2)}×`),
-      this.slider("Volume", "volume", 0, 1, 0.05, (v) => `${Math.round(v * 100).toString()}%`),
-      this.toggle("Invert vertical look", "invertY"),
-      this.toggle("Auto-jump up ledges", "autoJump"),
-      this.toggle("View bobbing", "viewBob"),
-      this.toggle("Show performance stats", "showStats"),
+      this.toggle(this.t("invertY"), "invertY"),
+      this.toggle(this.t("autoJump"), "autoJump"),
+      this.toggle(this.t("viewBob"), "viewBob"),
+      this.toggle(this.t("showStats"), "showStats"),
+      this.row(this.t("language"), language),
     );
     screen.append(list, this.backButton());
     return screen;
@@ -227,22 +259,16 @@ export class Menu {
   private buildWorld(): HTMLElement {
     const screen = el("div", "menu-screen");
     screen.dataset.screen = "world";
-    screen.append(el("h2", undefined, "Worlds"));
-    screen.append(
-      el(
-        "p",
-        "panel-hint",
-        `Every world grows from a seed. You're in world ${this.handlers.seed.toString()} — share that number and a friend gets the same land.`,
-      ),
-    );
+    screen.append(el("h2", undefined, this.t("worlds")));
+    screen.append(el("p", "panel-hint", this.t("worldsIntro", { seed: this.handlers.seed })));
 
     const form = el("form", "seed-form");
     const input = el("input");
     input.type = "text";
-    input.placeholder = "A number or any word";
+    input.placeholder = this.t("seedPlaceholder");
     input.maxLength = 40;
-    input.setAttribute("aria-label", "World seed");
-    const create = el("button", "btn primary", "Explore this world");
+    input.setAttribute("aria-label", this.t("seedLabel"));
+    const create = el("button", "btn primary", this.t("exploreWorld"));
     create.type = "submit";
     form.append(input, create);
     form.addEventListener("submit", (e) => {
@@ -250,22 +276,22 @@ export class Menu {
       this.handlers.onOpenWorld(seedFromText(input.value));
     });
 
-    const random = el("button", "btn", "Surprise me");
+    const random = el("button", "btn", this.t("surpriseMe"));
     random.type = "button";
     random.addEventListener("click", () => {
       this.handlers.onOpenWorld(seedFromText(""));
     });
 
-    const reset = el("button", "btn danger", "Undo all my changes to this world");
+    const reset = el("button", "btn danger", this.t("resetWorld"));
     reset.type = "button";
     let armed = false;
     reset.addEventListener("click", () => {
       if (!armed) {
         armed = true;
-        reset.textContent = "Tap again to erase everything you built here";
+        reset.textContent = this.t("resetConfirm");
         setTimeout(() => {
           armed = false;
-          reset.textContent = "Undo all my changes to this world";
+          reset.textContent = this.t("resetWorld");
         }, 4000);
         return;
       }
@@ -277,7 +303,7 @@ export class Menu {
   }
 
   private backButton(): HTMLElement {
-    const back = el("button", "btn", "Back");
+    const back = el("button", "btn", this.t("back"));
     back.type = "button";
     back.addEventListener("click", () => {
       this.show("main");

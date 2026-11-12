@@ -27,22 +27,28 @@
         <div id="overlay-content" class="menu">
           <div class="menu-screen" data-screen="main">
             <h1 class="title">Lumenwild</h1>
-            <p class="tagline">An endless world of light, built block by block.</p>
+            <p class="tagline" data-i18n="tagline">
+              An endless world of light, built block by block.
+            </p>
             <button id="play-button" class="btn primary" type="button">Play</button>
             <div class="menu-row">
-              <button id="settings-button" class="btn" type="button">Settings</button>
-              <button id="world-button" class="btn" type="button">Worlds</button>
-              <button id="fullscreen-button" class="btn" type="button">Fullscreen</button>
+              <button id="settings-button" class="btn" type="button" data-i18n="settings">
+                Settings
+              </button>
+              <button id="world-button" class="btn" type="button" data-i18n="worlds">Worlds</button>
+              <button id="fullscreen-button" class="btn" type="button" data-i18n="fullscreen">
+                Fullscreen
+              </button>
             </div>
-            <p class="hint controls-desktop">
+            <p class="hint controls-desktop" data-i18n-html="hintDesktop">
               <kbd>WASD</kbd> move &middot; <kbd>Space</kbd> jump (twice to fly) &middot;
               <kbd>Shift</kbd> sprint<br />
               <kbd>Left click</kbd> break &middot; <kbd>Right click</kbd> place &middot;
               <kbd>Middle click</kbd> pick<br />
               <kbd>E</kbd> blocks &middot; <kbd>1</kbd>-<kbd>9</kbd> or scroll to choose &middot;
-              <kbd>F3</kbd> stats
+              <kbd>F1</kbd> photo mode
             </p>
-            <p class="hint controls-touch">
+            <p class="hint controls-touch" data-i18n-html="hintTouch">
               Left thumb moves &middot; drag the right side to look<br />
               Tap to break &middot; the buttons jump, place and fly<br />
               Tap a slot to choose a block

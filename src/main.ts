@@ -2,6 +2,7 @@ import "./style.css";
 import * as THREE from "three";
 import { SoundEngine } from "./audio/sound";
 import { GAME_NAME } from "./branding";
+import { createTranslator, resolveLocale, type Translator } from "./i18n";
 import { GamepadInput } from "./input/gamepad";
 import { ChunkMeshManager } from "./render/chunk-mesh-manager";
 import { CpuRenderer } from "./render/cpu-renderer";
@@ -78,20 +79,19 @@ declare global {
  * have. If anything at all goes wrong during boot — and the WebGL and
  * worker paths already have their own fallbacks — say so, visibly, in the
  * menu the player is already looking at. */
-function showFatalError(error: unknown): void {
+function showFatalError(error: unknown, t: Translator): void {
   const content = document.querySelector("#overlay-content");
   if (!content) return;
   const message = error instanceof Error ? error.message : String(error);
   const screen = document.createElement("div");
   screen.className = "menu-screen";
   const title = document.createElement("h2");
-  title.textContent = `${GAME_NAME} couldn't start`;
+  title.textContent = t("fatalTitle", { name: GAME_NAME });
   const detail = document.createElement("p");
   detail.textContent = message;
   const hint = document.createElement("p");
   hint.className = "panel-hint";
-  hint.textContent =
-    "Try a hard refresh or another browser. If it keeps happening, please report this exact message.";
+  hint.textContent = t("fatalHint");
   screen.append(title, detail, hint);
   content.replaceChildren(screen);
 }
@@ -143,6 +143,10 @@ function boot(): void {
   ) {
     settings.values.quality = qualityParam;
   }
+  const langParam = params.get("lang");
+  if (langParam === "en" || langParam === "fr") settings.values.language = langParam;
+  const t = createTranslator(resolveLocale(settings.values.language, navigator.languages));
+  document.documentElement.lang = t.locale;
   const viewParam = Number.parseInt(params.get("view") ?? "", 10);
   if (Number.isFinite(viewParam)) {
     settings.values.viewDistance = Math.max(2, Math.min(16, viewParam));
@@ -259,9 +263,11 @@ function boot(): void {
     if (!stuck && saved.y > 0 && saved.y < CHUNK_HEIGHT + 64) player.restore(saved);
   }
 
-  const hotbar = new Hotbar(hotbarContainer, atlas.canvas, sanitizeHotbar(saved?.hotbar));
+  const hotbar = new Hotbar(hotbarContainer, atlas.canvas, sanitizeHotbar(saved?.hotbar), (name) =>
+    t.block(name),
+  );
   if (saved) hotbar.select(saved.slot);
-  const inventory = new Inventory(app, atlas.canvas);
+  const inventory = new Inventory(app, atlas.canvas, t);
   const hud = new Hud(app);
   hud.setStatsVisible(settings.values.showStats);
 
@@ -307,7 +313,7 @@ function boot(): void {
   };
 
   hotbar.onChange = () => {
-    hud.announce(BLOCKS[hotbar.selectedBlock].name);
+    hud.announce(t.block(BLOCKS[hotbar.selectedBlock].name));
     sound.select();
   };
 
@@ -363,6 +369,11 @@ function boot(): void {
   const menu = new Menu(menuRoot, settings, {
     seed: SEED,
     touch,
+    t,
+    onLanguageChange: () => {
+      persist();
+      window.location.reload();
+    },
     canUsePost: webgl?.supportsPost ?? false,
     onClick: () => {
       sound.unlock();
@@ -410,6 +421,8 @@ function boot(): void {
       case "showStats":
         hud.setStatsVisible(values.showStats);
         break;
+      case "language":
+        break; // applied by a reload (see the menu's onLanguageChange)
     }
   };
   settings.onChange(applySetting);
@@ -427,7 +440,7 @@ function boot(): void {
     persist();
   };
   player.onFlightChange = (flying) => {
-    hud.announce(flying ? "Flying" : "Walking");
+    hud.announce(t(flying ? "flying" : "walking"));
     touchControls?.setFlying(flying);
   };
   player.events = {
@@ -722,7 +735,7 @@ function boot(): void {
             URL.revokeObjectURL(link.href);
           }, 5000);
         }, "image/png");
-        hud.announce("Screenshot saved");
+        hud.announce(t("screenshotSaved"));
       }
     } else if (cpu) {
       cpu.applySky(skyStateAt(clock));
@@ -737,5 +750,5 @@ try {
   boot();
 } catch (error) {
   console.error(error);
-  showFatalError(error);
+  showFatalError(error, createTranslator(resolveLocale("auto", navigator.languages)));
 }

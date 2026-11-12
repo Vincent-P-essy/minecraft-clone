@@ -29,7 +29,7 @@ mkdirSync(OUT_DIR, { recursive: true });
  * position of one never leak into the next. The light tier keeps software
  * rendering fast enough for real-time input tests. */
 const pageUrl = (seed, extra = "quality=low&view=5") =>
-  `${BASE_URL}?seed=${seed.toString()}&${extra}`;
+  `${BASE_URL}?seed=${seed.toString()}&lang=en&${extra}`;
 
 /** Blocks that aren't a solid cube to stand a new block on. */
 const NOT_GROUND = [0, 5, 10, 11, 12, 13, 31, 33];
@@ -403,6 +403,26 @@ try {
   }
   await page.close();
 
+  // ---- the interface speaks French when asked to ----
+  const frenchPage = await openPage("french", `${BASE_URL}?seed=2026&lang=fr&quality=low&view=3`);
+  await waitForWorld(frenchPage, 5);
+  const french = await frenchPage.evaluate(() => ({
+    lang: document.documentElement.lang,
+    play: document.querySelector("#play-button")?.textContent?.trim() ?? "",
+    settings: document.querySelector("#settings-button")?.textContent?.trim() ?? "",
+    slot: document.querySelector(".hotbar-slot")?.getAttribute("title") ?? "",
+  }));
+  report(
+    "the interface is available in French (menu and block names)",
+    french.lang === "fr" &&
+      french.play === "Jouer" &&
+      french.settings === "Réglages" &&
+      french.slot === "herbe",
+    JSON.stringify(french),
+  );
+  await frenchPage.screenshot({ path: path.join(OUT_DIR, "05b-french.png") });
+  await frenchPage.close();
+
   // =====================================================================
   // 2. Every graphics tier compiles its shaders and draws a real frame
   // =====================================================================
@@ -557,7 +577,7 @@ try {
   // =====================================================================
   // Proves the game detects a touch device, shows on-screen controls, and
   // is fully playable with thumb + drag + tap — no keyboard, no mouse.
-  const mobilePage = await openPage("mobile", `${BASE_URL}?seed=505&view=4`, {
+  const mobilePage = await openPage("mobile", `${BASE_URL}?seed=505&view=4&lang=en`, {
     width: 390,
     height: 844,
     deviceScaleFactor: 2,

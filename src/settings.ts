@@ -1,3 +1,4 @@
+import type { LanguageSetting } from "./i18n";
 import type { QualityLevel } from "./render/renderer";
 
 /** Player-tunable options, persisted between sessions. One plain object
@@ -16,6 +17,8 @@ export interface Settings {
   /** Master volume, 0..1. */
   volume: number;
   showStats: boolean;
+  /** Interface language; "auto" follows the browser. */
+  language: LanguageSetting;
 }
 
 export interface KeyValueStore {
@@ -42,6 +45,7 @@ export function defaultSettings(device: { touch: boolean; cores: number }): Sett
     viewBob: true,
     volume: 0.7,
     showStats: false,
+    language: "auto",
   };
 }
 
@@ -73,6 +77,7 @@ export function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
     viewBob: bool(r.viewBob, defaults.viewBob),
     volume: num(r.volume, defaults.volume, 0, 1),
     showStats: bool(r.showStats, defaults.showStats),
+    language: r.language === "en" || r.language === "fr" ? r.language : defaults.language,
   };
 }
 

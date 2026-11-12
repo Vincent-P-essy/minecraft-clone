@@ -358,6 +358,16 @@ kbd {
   accent-color: var(--accent);
 }
 
+.setting-row select {
+  grid-column: 2 / 4;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
 .setting-value {
   text-align: right;
   color: var(--ink-dim);

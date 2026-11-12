@@ -61,6 +61,13 @@ describe("sanitizeSettings", () => {
     expect(out.volume).toBe(desktop.volume);
   });
 
+  it("accepts only known languages", () => {
+    expect(sanitizeSettings({ language: "fr" }, desktop).language).toBe("fr");
+    expect(sanitizeSettings({ language: "en" }, desktop).language).toBe("en");
+    expect(sanitizeSettings({ language: "klingon" }, desktop).language).toBe("auto");
+    expect(sanitizeSettings({ language: 3 }, desktop).language).toBe("auto");
+  });
+
   it("never passes unknown keys through", () => {
     const out = sanitizeSettings({ __proto__: { evil: 1 }, extra: "x" }, desktop);
     expect(Object.keys(out).sort()).toEqual(Object.keys(desktop).sort());

@@ -1,4 +1,5 @@
 import { BLOCKS, type BlockId, INVENTORY_BLOCKS } from "../world/blocks";
+import type { Translator } from "../i18n";
 import { renderBlockIcon } from "./block-icon";
 
 /** The creative inventory: every block in the game on one panel. Choosing
@@ -9,7 +10,7 @@ export class Inventory {
   onChoose: ((block: BlockId) => void) | undefined;
   onClose: (() => void) | undefined;
 
-  constructor(parent: HTMLElement, atlas: HTMLCanvasElement) {
+  constructor(parent: HTMLElement, atlas: HTMLCanvasElement, t: Translator) {
     this.panel = document.createElement("div");
     this.panel.id = "inventory";
     this.panel.className = "panel hidden";
@@ -17,11 +18,11 @@ export class Inventory {
     const header = document.createElement("div");
     header.className = "panel-header";
     const title = document.createElement("h2");
-    title.textContent = "Blocks";
+    title.textContent = t("blocks");
     const close = document.createElement("button");
     close.type = "button";
     close.className = "icon-button";
-    close.setAttribute("aria-label", "Close");
+    close.setAttribute("aria-label", t("close"));
     close.textContent = "✕";
     close.addEventListener("click", () => {
       this.onClose?.();
@@ -34,8 +35,9 @@ export class Inventory {
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className = "inventory-cell";
-      cell.title = BLOCKS[block].name;
-      cell.setAttribute("aria-label", BLOCKS[block].name);
+      const name = t.block(BLOCKS[block].name);
+      cell.title = name;
+      cell.setAttribute("aria-label", name);
       cell.dataset.block = block.toString();
       cell.appendChild(renderBlockIcon(atlas, block, 64));
       cell.addEventListener("click", () => {
@@ -46,7 +48,7 @@ export class Inventory {
 
     const hint = document.createElement("p");
     hint.className = "panel-hint";
-    hint.textContent = "Pick a block to put it in the selected slot.";
+    hint.textContent = t("inventoryHint");
 
     this.panel.append(header, grid, hint);
     // Clicks on the panel must not fall through to the game canvas.
