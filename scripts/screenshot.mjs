@@ -139,6 +139,8 @@ const SCENES = [
     at: { x: 0.5, y: 80, z: 0.5, yaw: 0, pitch: 0 },
     stage: findCrystalCave,
   },
+  { name: "rain", time: 0.3, biome: 3, lift: 2, yaw: 0.5, pitch: -0.02, weather: [1, 1] },
+  { name: "snow", time: 0.3, biome: 7, skip: 6, lift: 9, yaw: 1.0, pitch: -0.3, weather: [1, 1] },
   { name: "menu", time: 0.2, biome: 3, lift: 6, yaw: 0.5, pitch: -0.1, keepMenu: true },
   {
     name: "mobile",
@@ -149,7 +151,7 @@ const SCENES = [
     pitch: -0.12,
     play: true,
     viewport: { width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
-    query: "quality=medium&view=7&fullres=1",
+    query: "quality=medium&view=7&fullres=1&lang=en",
   },
 ];
 
@@ -183,7 +185,7 @@ try {
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
     await page.setViewport(scene.viewport ?? { width: 1280, height: 720 });
-    const query = scene.query ?? "quality=high&view=9&fullres=1";
+    const query = scene.query ?? "quality=high&view=9&fullres=1&lang=en";
     await page.goto(`${BASE_URL}?seed=2026&${query}`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
@@ -196,6 +198,8 @@ try {
     await page.evaluate((s) => {
       const m = window.__mc;
       m.setTime(s.time);
+      if (s.weather) m.setWeather(s.weather[0], s.weather[1]);
+      else m.setWeather(0, 0);
       if (s.at) {
         m.teleport(s.at.x, s.at.y, s.at.z, s.at.yaw, s.at.pitch);
       } else if (s.biome !== undefined) {

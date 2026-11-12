@@ -98,6 +98,7 @@ const TERRAIN_FRAGMENT = /* glsl */ `
   uniform vec3 uBlockLight;
   uniform float uMinAmbient;
   uniform float uShadowStrength;
+  uniform float uWet;
 
   ${ATMOSPHERE}
   ${CLOUDS}
@@ -162,6 +163,10 @@ const TERRAIN_FRAGMENT = /* glsl */ `
     float blkL = vLight.y;
     float ao = vLight.z;
     float skyVis = skyL * skyL;
+
+    // Rain darkens whatever it can reach: ground under open sky, not the
+    // floor of a cave or a room.
+    albedo *= 1.0 - 0.3 * uWet * smoothstep(0.75, 1.0, skyL);
 
     vec3 ambient = mix(uAmbientGround, uAmbientSky, n.y * 0.5 + 0.5) * skyVis;
 

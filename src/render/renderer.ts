@@ -192,6 +192,7 @@ export class WorldRenderer {
       uFogEnd: { value: 140 },
       uUnderwater: { value: 0 },
       uCave: { value: 0 },
+      uWet: { value: 0 },
       uExposure: { value: 1 },
       uLightDir: vec3(),
       uLightColor: vec3(),
@@ -310,7 +311,10 @@ export class WorldRenderer {
     const end = (this.viewDistance - 0.5) * CHUNK_SIZE;
     if (this.uniforms.uFogEnd) this.uniforms.uFogEnd.value = end;
     if (this.uniforms.uFogStart) this.uniforms.uFogStart.value = end * 0.66;
-    if (this.uniforms.uFogDensity) this.uniforms.uFogDensity.value = 1.1 / end;
+    this.baseFogDensity = 1.1 / end;
+    if (this.uniforms.uFogDensity) {
+      this.uniforms.uFogDensity.value = this.baseFogDensity * this.fogThickening;
+    }
     this.camera.far = Math.max(end + 48, 320);
     this.camera.updateProjectionMatrix();
   }
@@ -373,6 +377,18 @@ export class WorldRenderer {
 
   get renderScale(): number {
     return SCALE_LADDER[this.scaleIndex] ?? 1;
+  }
+
+  private baseFogDensity = 0.007;
+  private fogThickening = 1;
+
+  /** Cloud cover, rain haze and wet ground for the current weather. */
+  setWeather(overcast: number, rain: number): void {
+    const u = this.uniforms;
+    if (u.uCloudCover) u.uCloudCover.value = 0.46 + 0.42 * overcast;
+    this.fogThickening = 1 + 1.7 * rain + 0.3 * overcast;
+    if (u.uFogDensity) u.uFogDensity.value = this.baseFogDensity * this.fogThickening;
+    if (u.uWet) u.uWet.value = rain;
   }
 
   /** 0 = open air, 1 = deep underground (see the fog in shaders/common.ts). */

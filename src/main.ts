@@ -9,9 +9,11 @@ import { CpuRenderer } from "./render/cpu-renderer";
 import { environmentAt } from "./render/environment";
 import { HeldBlock } from "./render/held-block";
 import { Particles } from "./render/particles";
+import { Rain } from "./render/rain";
 import { QUALITY_PROFILES, WorldRenderer } from "./render/renderer";
 import { DAY_LENGTH_SECONDS, STARTUP_PHASE, skyStateAt } from "./render/sky";
 import { createTextureAtlas } from "./render/texture-atlas";
+import { applyWeather, type Weather, weatherAt } from "./render/weather";
 import { PlayerController } from "./player/controller";
 import { BlockInteraction } from "./player/interaction";
 import { aabbFromFeetPosition, aabbIntersectsSolid } from "./player/physics";
@@ -69,6 +71,8 @@ declare global {
       flying: () => boolean;
       inventoryOpen: () => boolean;
       settings: () => Record<string, string | number | boolean>;
+      /** Forces the weather (overcast, rain in 0..1); null returns to the forecast. */
+      setWeather: (overcast: number | null, rain?: number) => void;
       /** Stages a scene for screenshots; not recorded as a player edit. */
       setBlock: (x: number, y: number, z: number, id: number) => void;
     };
@@ -165,6 +169,7 @@ function boot(): void {
   let chunkMeshes: ChunkMeshManager | null = null;
   let particles: Particles | null = null;
   let heldBlock: HeldBlock | null = null;
+  let rain: Rain | null = null;
   let highlight: THREE.LineSegments | null = null;
   try {
     const renderer = new WorldRenderer(
@@ -185,12 +190,15 @@ function boot(): void {
     // The camera carries the held block, so it has to be part of the scene.
     renderer.scene.add(renderer.camera);
     const hand = new HeldBlock(renderer.camera, renderer.uniforms, directOutput());
+    const shower = new Rain(renderer.scene, directOutput());
     renderer.onMaterialsChanged = () => {
       meshes.setMaterials({ terrain: renderer.terrainMaterial, water: renderer.waterMaterial });
       sparks.setDirect(directOutput());
       hand.setDirect(directOutput());
+      shower.setDirect(directOutput());
     };
     heldBlock = hand;
+    rain = shower;
     highlight = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
       new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.75 }),
@@ -302,11 +310,16 @@ function boot(): void {
   // ---- time of day ----
   let gameTime = saved?.time ?? STARTUP_PHASE * DAY_LENGTH_SECONDS;
   let frozenTime: number | null = null;
+  let forcedWeather: Weather | null = null;
+  /** Lightning: a flash that decays, and when the next strike is due. */
+  let flash = 0;
+  let nextStrike = 20;
 
   const persist = (): void => {
     storePlayerSave(window.localStorage, SEED, {
       ...player.pose(),
-      time: gameTime % DAY_LENGTH_SECONDS,
+      // Absolute, not wrapped to a day: the weather is a function of it.
+      time: gameTime,
       hotbar: [...hotbar.contents],
       slot: hotbar.selectedSlot,
     });
@@ -582,6 +595,9 @@ function boot(): void {
     flying: () => player.isFlying,
     inventoryOpen: () => inventory.isOpen,
     settings: () => ({ ...settings.values }),
+    setWeather: (overcast, amount = 0) => {
+      forcedWeather = overcast === null ? null : { overcast, rain: amount };
+    },
     setBlock: (x, y, z, id) => {
       if (!(id in BLOCKS) || y < 1 || y >= CHUNK_HEIGHT) return;
       world.setBlock(x, y, z, id as BlockId);
@@ -667,13 +683,28 @@ function boot(): void {
 
     caveFactor += (caveTarget() - caveFactor) * (1 - Math.exp(-dt * 1.6));
     const underwater = player.eyeInWater;
-    const environment = environmentAt(clock);
+
+    // Weather follows the game clock, not the (possibly frozen) time of day.
+    const weather = forcedWeather ?? weatherAt(SEED, gameTime);
+    flash = Math.max(0, flash - dt * 5);
+    if (weather.rain > 0.75) {
+      nextStrike -= dt;
+      if (nextStrike <= 0) {
+        flash = 1;
+        nextStrike = 9 + Math.random() * 22;
+        if (caveFactor < 0.5) sound.thunder();
+      }
+    }
+    const environment = applyWeather(environmentAt(clock), weather, flash * (1 - caveFactor));
+    const sheltered = rain?.sheltered(camera.position) ?? false;
 
     sound.update({
       night: environment.night,
       underwater,
       cave: caveFactor,
       speed: Math.hypot(player.velocity.x, player.velocity.y, player.velocity.z),
+      rain: weather.rain,
+      sheltered,
     });
 
     if (time - lastSave > SAVE_INTERVAL_MS && player.isActive) {
@@ -719,6 +750,22 @@ function boot(): void {
         environment.exposure,
         fireflyGround,
       );
+      // Cold places get snow instead of rain.
+      const here = sampleColumn(Math.floor(camera.position.x), Math.floor(camera.position.z));
+      rain?.update(
+        dt,
+        camera,
+        world,
+        underwater ? 0 : weather.rain * open,
+        here.frozen || here.isSnowy,
+        [
+          environment.ambientSky[0] + environment.lightColor[0] * 0.3,
+          environment.ambientSky[1] + environment.lightColor[1] * 0.3,
+          environment.ambientSky[2] + environment.lightColor[2] * 0.3,
+        ],
+        environment.exposure,
+      );
+      webgl.setWeather(weather.overcast, weather.rain);
       webgl.setCaveFactor(caveFactor);
       webgl.setEnvironment(environment, time / 1000, underwater);
       webgl.render();

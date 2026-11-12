@@ -65,6 +65,9 @@ export interface Ambience {
   readonly cave: number;
   /** How fast the player is moving through the air, blocks per second. */
   readonly speed: number;
+  /** 0..1 rain intensity, and whether there's a roof overhead. */
+  readonly rain: number;
+  readonly sheltered: boolean;
 }
 
 export class SoundEngine {
@@ -73,6 +76,7 @@ export class SoundEngine {
   private effects: BiquadFilterNode | null = null;
   private noise: AudioBuffer | null = null;
   private wind: { gain: GainNode; filter: BiquadFilterNode } | null = null;
+  private rain: { gain: GainNode; filter: BiquadFilterNode } | null = null;
   private volume = 0.7;
   private nextChirp = 0;
   private nextCricket = 0;
@@ -112,6 +116,21 @@ export class SoundEngine {
       windGain.gain.value = 0;
       windSource.connect(windFilter).connect(windGain).connect(effects);
       windSource.start();
+
+      // Rain: the same noise, brighter and steadier, on its own gain.
+      const rainSource = context.createBufferSource();
+      rainSource.buffer = noise;
+      rainSource.loop = true;
+      rainSource.playbackRate.value = 1.3;
+      const rainFilter = context.createBiquadFilter();
+      rainFilter.type = "bandpass";
+      rainFilter.frequency.value = 2600;
+      rainFilter.Q.value = 0.35;
+      const rainGain = context.createGain();
+      rainGain.gain.value = 0;
+      rainSource.connect(rainFilter).connect(rainGain).connect(effects);
+      rainSource.start(0, 0.37);
+      this.rain = { gain: rainGain, filter: rainFilter };
 
       this.context = context;
       this.master = master;
@@ -217,6 +236,14 @@ export class SoundEngine {
     this.burst({ frequency: 520, q: 0.6, duration: 0.3, gain: 0.4 }, 1, entering ? 0.9 : 0.4, 0.03);
   }
 
+  /** A rolling crack of thunder, a moment after the flash. */
+  thunder(): void {
+    const rumble = { frequency: 110, q: 0.5, duration: 2.6, gain: 0.9 };
+    this.burst(rumble, 1, 1, 0.25);
+    this.burst({ frequency: 60, q: 0.6, duration: 3.4, gain: 0.8 }, 1, 0.8, 0.5);
+    this.burst({ frequency: 700, q: 0.4, duration: 0.5, gain: 0.5 }, 1, 0.6, 0.22);
+  }
+
   click(): void {
     this.tone(880, 0.05, 0.06, "triangle", 1.25);
   }
@@ -245,7 +272,15 @@ export class SoundEngine {
       0.5,
     );
 
-    if (ambience.underwater || ambience.cave > 0.5) return;
+    // Rain: loud in the open, a duller patter under a roof, gone deep
+    // underground.
+    if (this.rain) {
+      const reach = open * (ambience.sheltered ? 0.45 : 1) * (ambience.underwater ? 0.25 : 1);
+      this.rain.gain.gain.setTargetAtTime(ambience.rain * 0.3 * reach, now, 0.5);
+      this.rain.filter.frequency.setTargetAtTime(ambience.sheltered ? 1100 : 2600, now, 0.4);
+    }
+
+    if (ambience.underwater || ambience.cave > 0.5 || ambience.rain > 0.3) return;
 
     // Birdsong by day: a couple of quick rising or falling whistles.
     if (ambience.night < 0.35 && now >= this.nextChirp) {
