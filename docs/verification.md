@@ -16,9 +16,9 @@ frame-rate numbers.
 | Lint (strict, type-checked) | `npm run lint`      | clean                |
 | Formatting                  | `npm run format`    | clean                |
 | Types (strict)              | `npm run typecheck` | clean                |
-| Unit tests                  | `npm run test`      | 325 passed, 24 files |
+| Unit tests                  | `npm run test`      | 362 passed, 27 files |
 | Production build            | `npm run build`     | succeeds             |
-| End-to-end                  | `npm run e2e`       | 40 of 40 checks pass |
+| End-to-end                  | `npm run e2e`       | 41 of 41 checks pass |
 
 ## End-to-end scenarios (`scripts/visual-check.mjs`)
 
@@ -33,6 +33,7 @@ build.
    menu that offers to resume; a setting changes live; after a reload the
    position, hotbar, settings, flight state and world edits are all
    restored.
+   A separate page confirms the French interface (menu and block names).
 2. **Graphics tiers** — medium, high and ultra each compile their shaders
    and render a varied frame with no console errors (low is the tier the
    other scenarios run on).
@@ -61,12 +62,23 @@ build.
   `release.yml` workflow were written here but have **not been run on
   GitHub's runners**; expect to adjust them on first use.
 
+## Looked at, not asserted
+
+Rain, snow, the overcast sky and the held block were checked by eye in
+staged screenshots (`scripts/screenshot.mjs`, and `window.__mc.setWeather`
+to force a front): rain stops under tree canopies, snow replaces it on the
+tundra, the block in hand is lit and glows when emissive. No automated
+check looks at those pixels.
+
 ## Not verified
 
 - **Frame rate on real hardware.** Nothing here measures it. The design
   targets it (8-byte vertices, cave culling, a tier with no post passes,
   adaptive render scale), but the numbers have to come from real devices.
 - **Real touch devices, notches, thermals, battery.**
+- **Real controllers.** The mapping from a standard gamepad to actions is
+  unit-tested against synthetic pad states; no physical pad (or Steam
+  Deck) was connected.
 - **Audio output** — the sound engine is exercised for not throwing; what
   it sounds like was not listened to.
 - **Safari / iOS WebKit and Firefox** — only Chromium was driven. The

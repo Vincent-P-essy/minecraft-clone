@@ -18,6 +18,7 @@
 | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | ![The same cabin at night, lanterns glowing](docs/screenshots/night-lanterns.jpg) | ![A snow-capped mountain over a pine forest](docs/screenshots/vista.jpg) |
 | ![Sunlight through a forest canopy](docs/screenshots/forest.jpg)                  | ![Sunset over a river mouth](docs/screenshots/sunset-shore.jpg)          |
+| ![Rain in the forest, dry under the trees](docs/screenshots/rain.jpg)             | ![Snow falling on the tundra](docs/screenshots/snow.jpg)                 |
 | ![Lumen crystals lighting a cave](docs/screenshots/cave-crystals.jpg)             | ![The game on a phone, with touch controls](docs/screenshots/mobile.jpg) |
 
 _All captured from the production build by `scripts/screenshot.mjs`, in
@@ -25,15 +26,16 @@ software WebGL — a real GPU draws the same frames, just faster._
 
 ## Playing
 
-|                      | Desktop                                            | Touch                                        |
-| -------------------- | -------------------------------------------------- | -------------------------------------------- |
-| Move / jump / sprint | `WASD` (or arrows) · `Space` · `Shift`             | left-thumb joystick (push to edge to sprint) |
-| Fly                  | double-tap `Space` or `F` · `Space` up · `C` down  | wing button · jump up · descend button       |
-| Look                 | mouse (pointer lock)                               | drag the right half of the screen            |
-| Break / place / pick | left click (hold to repeat) / right / middle click | tap to break · place button                  |
-| Choose a block       | `1`-`9` or scroll · `E` opens all 32 blocks        | tap a slot · grid button opens all blocks    |
-| Pause / stats        | `Esc` · `F3`                                       | pause button                                 |
-| Share a world        | Worlds menu, or add `?seed=<number>` to the URL    | same                                         |
+|                      | Keyboard & mouse                                   | Controller                     | Touch                                  |
+| -------------------- | -------------------------------------------------- | ------------------------------ | -------------------------------------- |
+| Move / jump / sprint | `WASD` (or arrows) · `Space` · `Shift`             | left stick · A · stick click   | left-thumb joystick (edge to sprint)   |
+| Fly                  | double-tap `Space` or `F` · `Space` up · `C` down  | X (or A twice) · A up · B down | wing button · jump up · descend button |
+| Look                 | mouse (pointer lock)                               | right stick                    | drag the right half of the screen      |
+| Break / place / pick | left click (hold to repeat) / right / middle click | RT / LT (hold to repeat)       | tap to break · place button            |
+| Choose a block       | `1`-`9` or scroll · `E` opens all 32 blocks        | LB / RB · Y opens all blocks   | tap a slot · grid button               |
+| Pause                | `Esc`                                              | Start                          | pause button                           |
+| Photo mode           | `F1` hides the HUD · `F2` saves a PNG · `F3` stats |                                |                                        |
+| Share a world        | Worlds menu, or add `?seed=<number>` to the URL    |                                | same                                   |
 
 Keys are bound by position, so `WASD` is `ZQSD` on an AZERTY keyboard with
 no configuration. If the browser refuses pointer lock the game switches to
@@ -43,6 +45,8 @@ CPU raycaster and keeps playing.
 Your position, the time of day, your hotbar and everything you built are
 saved per world and restored when you come back. Settings (graphics tier,
 view distance, field of view, sensitivity, volume, auto-jump…) apply live.
+The interface is in English and French, following the browser's language
+or your choice in the settings.
 
 ## What's in the world
 
@@ -53,6 +57,10 @@ view distance, field of view, sensitivity, volume, auto-jump…) apply live.
 - **Underground**: caverns linked by winding tunnels, coal and gold veins,
   lumen crystals in cavern walls and glowing mushrooms on their floors —
   caves are lit from within before you bring a single lantern.
+- **Weather**: fronts drift through over minutes — the sky closes over,
+  the light flattens, and a strong front brings rain (snow in the cold
+  biomes), wet ground, lightning and thunder. Rain stays outdoors: it
+  doesn't fall through roofs, into caves or under trees.
 - **34 block types**, 32 of them placeable: stone and brick variants, three
   woods, planks, glass, ice, sand and sandstone, plants and flowers, and
   light sources.
@@ -110,6 +118,11 @@ flowchart LR
   120 Hz and the camera interpolates between the last two steps, so
   movement is identical at 30, 60 or 144 Hz and a late frame isn't a
   stutter.
+- **Rain that knows where the roofs are.** Rain and snow are one
+  instanced mesh of world-anchored drops wrapping around the camera. A
+  32×32 map of roof heights around the player — addressed by world
+  position, so it stays valid as you walk, and refreshed a strip per
+  frame — lets each drop hide below whatever is overhead.
 - **Zero art, zero audio files.** 41 textures are painted in code from a
   seeded PRNG (the hotbar icons are little isometric cubes rendered from
   them). Every sound — footsteps per material, digging, splashes, wind,
@@ -148,11 +161,11 @@ non-technical checklist.
 ```sh
 npm ci
 npm run dev          # local dev server
-npm run check        # lint, format, types, 325 offline tests
+npm run check        # lint, format, types, 362 offline tests
 npm run build        # production bundle
 
 npm run build && npx vite preview --port 4173 &
-npm run e2e          # 40 end-to-end checks in headless Chromium
+npm run e2e          # 41 end-to-end checks in headless Chromium
 node scripts/screenshot.mjs   # regenerate the README gallery
 ```
 
@@ -160,15 +173,17 @@ Everything interesting is testable without a browser: terrain determinism
 and its layering invariants, light propagation (down shafts, under roofs,
 through leaves and water, across chunk borders), mesher output down to
 winding order and the surface/cave split, collision and flight, the
-day/night model's continuity, the generated textures' alpha conventions,
-and settings and saves against corrupt or hostile payloads.
+day/night model's continuity, the weather's pacing, the controller
+mapping, both languages' completeness, the generated textures' alpha
+conventions, and settings and saves against corrupt or hostile payloads.
 
 On top of that, `scripts/visual-check.mjs` plays the _built_ game in
 headless Chromium with software WebGL — no GPU needed, so it runs in CI.
 Each scenario gets its own browser context, like a different player on a
 different device: mouse and keyboard with pointer lock, pointer lock
 refused (drag-look fallback), no WebGL at all (CPU raycaster), a phone
-with only a touchscreen, every graphics tier compiling and rendering,
+with only a touchscreen, every graphics tier compiling and rendering, the
+French interface,
 inventory, flight, settings and saves surviving a reload, and the service
 worker booting the game with the network cut. What was verified, and where
 it wasn't possible to verify, is recorded in
