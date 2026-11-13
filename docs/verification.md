@@ -16,9 +16,9 @@ frame-rate numbers.
 | Lint (strict, type-checked) | `npm run lint`      | clean                |
 | Formatting                  | `npm run format`    | clean                |
 | Types (strict)              | `npm run typecheck` | clean                |
-| Unit tests                  | `npm run test`      | 362 passed, 27 files |
+| Unit tests                  | `npm run test`      | 389 passed, 28 files |
 | Production build            | `npm run build`     | succeeds             |
-| End-to-end                  | `npm run e2e`       | 41 of 41 checks pass |
+| End-to-end                  | `npm run e2e`       | 47 of 47 checks pass |
 
 ## End-to-end scenarios (`scripts/visual-check.mjs`)
 
@@ -34,6 +34,11 @@ build.
    position, hotbar, settings, flight state and world edits are all
    restored.
    A separate page confirms the French interface (menu and block names).
+   **Adventure mode** — the bag starts empty; holding the button digs
+   through the ground over time and the block lands in the bag; flight
+   is refused; a recipe turns a log into planks and unaffordable ones are
+   disabled; the journal records the first dig and craft; bag and journal
+   survive a reload.
 2. **Graphics tiers** — medium, high and ultra each compile their shaders
    and render a varied frame with no console errors (low is the tier the
    other scenarios run on).
@@ -54,13 +59,17 @@ build.
   `process`, the preload flag is visible, and a path-traversal request
   (`app://game/..%2F..%2Fpackage.json`) returns 404. Packaging with
   `electron-builder` was **not** run here.
-- **Mobile (Capacitor)** — `npx cap add android` and `npx cap sync`
-  succeed and copy the web build into the generated Android project. No
-  Android SDK is available here, so **no APK was built and nothing was run
-  on a device or emulator**. iOS was not attempted (needs macOS).
-- **GitHub Actions** — the `e2e` job in `ci.yml` and the manual
-  `release.yml` workflow were written here but have **not been run on
-  GitHub's runners**; expect to adjust them on first use.
+- **Mobile (Capacitor 8, Android)** — the committed Android project is
+  compiled by the `Android` workflow on GitHub's runners: the first run
+  built a debug APK (target API 36) from the customized project —
+  immersive activity, back-button handling, generated icons. **The APK has
+  not been installed on any device or emulator**, and the signed release
+  bundle has not been built (it needs the upload key). iOS was not
+  attempted (needs macOS).
+- **GitHub Actions** — `ci.yml` (checks and the end-to-end job), the Pages
+  deployment and `android.yml` have all run green on GitHub. The manual
+  `release.yml` workflow (desktop installers, signed Android bundle) has
+  **not** been run.
 
 ## Looked at, not asserted
 

@@ -48,6 +48,19 @@ view distance, field of view, sensitivity, volume, auto-jump…) apply live.
 The interface is in English and French, following the browser's language
 or your choice in the settings.
 
+## Two ways to play
+
+- **Creative** — every block, unlimited, and you can fly.
+- **Adventure** — start with an empty bag. Blocks have to be dug up
+  (digging takes time, by material), are counted on the hotbar and spent
+  when placed; eleven simple recipes turn logs into planks, sand and coal
+  into glass, a crystal and planks into a lantern. No enemies, no hunger,
+  nothing to lose.
+
+Both modes keep a **journal** of 28 discoveries — every biome, the first
+dig, a lumen crystal, a night under the stars, a thunderstorm — announced
+as they happen. The mode is switched per world from the Worlds menu.
+
 ## What's in the world
 
 - **Terrain**: continents and oceans, rivers that cut valleys to the sea,
@@ -140,7 +153,9 @@ One build, three shells:
   from a private `app://` scheme with path-traversal checks and a strict
   Content-Security-Policy; navigation and permission requests are denied.
 - **Android / iOS** — [`mobile/`](mobile), Capacitor wrapping the same
-  build in a native WebView.
+  build in a native WebView. The Android project is committed and built
+  by CI on every push (a debug APK is attached to each run);
+  [`docs/play-store.md`](docs/play-store.md) is the submission guide.
 
 ```sh
 # desktop
@@ -148,8 +163,7 @@ npm run build:native && cd desktop && npm ci && npm start     # run it
 npm run dist                                                  # installers in desktop/release
 
 # android (needs the Android SDK)
-npm run build:native && cd mobile && npm ci
-npx cap add android && npm run android:apk
+npm run build:native && cd mobile && npm ci && npm run android:apk
 ```
 
 [`docs/shipping.md`](docs/shipping.md) covers what stands between these
@@ -161,11 +175,11 @@ non-technical checklist.
 ```sh
 npm ci
 npm run dev          # local dev server
-npm run check        # lint, format, types, 362 offline tests
+npm run check        # lint, format, types, 389 offline tests
 npm run build        # production bundle
 
 npm run build && npx vite preview --port 4173 &
-npm run e2e          # 41 end-to-end checks in headless Chromium
+npm run e2e          # 47 end-to-end checks in headless Chromium
 node scripts/screenshot.mjs   # regenerate the README gallery
 ```
 
@@ -183,7 +197,7 @@ Each scenario gets its own browser context, like a different player on a
 different device: mouse and keyboard with pointer lock, pointer lock
 refused (drag-look fallback), no WebGL at all (CPU raycaster), a phone
 with only a touchscreen, every graphics tier compiling and rendering, the
-French interface,
+French interface, Adventure mode (digging, crafting, the journal),
 inventory, flight, settings and saves surviving a reload, and the service
 worker booting the game with the network cut. What was verified, and where
 it wasn't possible to verify, is recorded in
@@ -191,8 +205,8 @@ it wasn't possible to verify, is recorded in
 
 ## Limits
 
-- It's a creative sandbox: no survival mode, crafting, mobs or
-  multiplayer.
+- Adventure mode is deliberately gentle: no enemies, health, hunger or
+  tools. There are no creatures and no multiplayer.
 - Water is still: it has depth, reflections and swimming, but breaking a
   dam doesn't flood anything.
 - Block light is one channel, so a cyan crystal and an amber lantern cast
