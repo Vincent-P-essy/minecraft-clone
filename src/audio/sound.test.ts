@@ -36,6 +36,7 @@ describe("SoundEngine before it is unlocked", () => {
       sound.select();
       sound.setPaused(true);
       sound.thunder();
+      sound.discover();
       sound.update({ night: 1, underwater: false, cave: 0, speed: 3, rain: 0.5, sheltered: true });
     }).not.toThrow();
   });

@@ -14,6 +14,11 @@ export interface PlayerSave {
   readonly time: number;
   readonly hotbar: readonly number[];
   readonly slot: number;
+  /** "creative" (everything, unlimited) or "adventure" (gather and craft). */
+  readonly mode?: "creative" | "adventure";
+  /** Raw saved bag and journal; validated by the classes that own them. */
+  readonly bag?: unknown;
+  readonly journal?: unknown;
 }
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -42,6 +47,9 @@ export function loadPlayerSave(storage: KeyValueStorage, seed: number): PlayerSa
       time: p.time,
       hotbar,
       slot: finite(p.slot) ? Math.max(0, Math.min(8, Math.floor(p.slot))) : 0,
+      mode: p.mode === "adventure" ? "adventure" : "creative",
+      bag: p.bag,
+      journal: p.journal,
     };
   } catch {
     return null; // a corrupt save just means a fresh start

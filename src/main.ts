@@ -2,6 +2,8 @@ import "./style.css";
 import * as THREE from "three";
 import { SoundEngine } from "./audio/sound";
 import { GAME_NAME } from "./branding";
+import { type DiscoveryId, Journal } from "./game/discoveries";
+import { Bag, craft, digSeconds, dropFor } from "./game/items";
 import { createTranslator, resolveLocale, type Translator } from "./i18n";
 import { GamepadInput } from "./input/gamepad";
 import { ChunkMeshManager } from "./render/chunk-mesh-manager";
@@ -72,6 +74,13 @@ declare global {
       hotbar: () => number[];
       flying: () => boolean;
       inventoryOpen: () => boolean;
+      gameMode: () => string;
+      setMode: (mode: string) => void;
+      /** What's in the Adventure bag, by block id. */
+      bag: () => Record<string, number>;
+      give: (block: number, amount: number) => void;
+      discoveries: () => string[];
+      digging: () => number;
       settings: () => Record<string, string | number | boolean>;
       /** Forces the weather (overcast, rain in 0..1); null returns to the forecast. */
       setWeather: (overcast: number | null, rain?: number) => void;
@@ -173,6 +182,7 @@ function boot(): void {
   let heldBlock: HeldBlock | null = null;
   let rain: Rain | null = null;
   let highlight: THREE.LineSegments | null = null;
+  let digVeil: THREE.Mesh | null = null;
   try {
     const renderer = new WorldRenderer(
       app,
@@ -208,6 +218,19 @@ function boot(): void {
     highlight.visible = false;
     highlight.renderOrder = 15;
     renderer.scene.add(highlight);
+    // A dark veil that thickens over a block as it's dug.
+    digVeil = new THREE.Mesh(
+      new THREE.BoxGeometry(1.006, 1.006, 1.006),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }),
+    );
+    digVeil.visible = false;
+    digVeil.renderOrder = 14;
+    renderer.scene.add(digVeil);
     if (params.has("fullres")) renderer.lockFullResolution();
     webgl = renderer;
     chunkMeshes = meshes;
@@ -278,6 +301,23 @@ function boot(): void {
   );
   if (saved) hotbar.select(saved.slot);
   const inventory = new Inventory(app, atlas.canvas, t);
+
+  // ---- game mode: Creative (everything, unlimited) or Adventure ----
+  const modeParam = params.get("mode");
+  let mode: "creative" | "adventure" =
+    modeParam === "adventure" || modeParam === "creative" ? modeParam : (saved?.mode ?? "creative");
+  const bag = new Bag(saved?.bag);
+  const journal = new Journal(saved?.journal as { found?: unknown; placed?: unknown } | undefined);
+  const inventoryState = (): { bag: Bag | null; journal: Journal } => ({
+    bag: mode === "adventure" ? bag : null,
+    journal,
+  });
+  const celebrate = (found: DiscoveryId[]): void => {
+    for (const id of found) {
+      hud.announce(t("discovered", { name: t.discovery(id) }));
+      sound.discover();
+    }
+  };
   const hud = new Hud(app);
   hud.setStatsVisible(settings.values.showStats);
 
@@ -295,9 +335,35 @@ function boot(): void {
     if (edit.id === BlockId.AIR) {
       sound.breakBlock(edit.previous);
       particles?.burst(edit.x, edit.y, edit.z, edit.previous);
+      if (mode === "adventure") {
+        // What was dug goes in the bag — and onto the hotbar if it's new.
+        const drop = dropFor(edit.previous);
+        if (drop !== BlockId.AIR && bag.add(drop) > 0 && !hotbar.contents.includes(drop)) {
+          const free = hotbar.contents.findIndex((block) => bag.count(block) === 0);
+          if (free >= 0) hotbar.setSlot(free, drop);
+        }
+      }
+      celebrate(journal.dug(edit.previous));
     } else {
       sound.placeBlock(edit.id);
+      if (mode === "adventure") bag.remove(edit.id);
+      celebrate(journal.built(edit.id));
     }
+  };
+  interaction.onDigTick = (block) => {
+    sound.step(block);
+  };
+  bag.onChange = () => {
+    hotbar.refresh();
+    inventory.refresh();
+  };
+  const applyMode = (): void => {
+    const adventure = mode === "adventure";
+    interaction.digSeconds = adventure ? digSeconds : undefined;
+    interaction.canPlace = adventure ? (block) => bag.count(block) > 0 : undefined;
+    hotbar.setCounts(adventure ? (block) => bag.count(block) : null);
+    player.setFlightAllowed(!adventure);
+    touchControls?.setFlightAllowed(!adventure);
   };
   interaction.onPick = (id) => {
     hotbar.pick(id);
@@ -324,6 +390,9 @@ function boot(): void {
       time: gameTime,
       hotbar: [...hotbar.contents],
       slot: hotbar.selectedSlot,
+      mode,
+      bag: bag.toJSON(),
+      journal: journal.toJSON(),
     });
   };
 
@@ -336,7 +405,8 @@ function boot(): void {
   const setInventory = (open: boolean): void => {
     if (open === inventory.isOpen) return;
     if (open && !player.isActive) return;
-    inventory.setOpen(open);
+    if (open) inventory.show(inventoryState());
+    else inventory.hide();
     interaction.enabled = !open;
     if (open) player.openUi();
     else player.closeUi();
@@ -345,6 +415,18 @@ function boot(): void {
   inventory.onChoose = (block) => {
     hotbar.assign(block);
     setInventory(false);
+  };
+  inventory.onCraft = (recipe) => {
+    if (mode !== "adventure" || !craft(bag, recipe)) return;
+    sound.placeBlock(recipe.output);
+    hud.announce(
+      t("crafted", { amount: recipe.amount, name: t.block(BLOCKS[recipe.output].name) }),
+    );
+    if (!hotbar.contents.includes(recipe.output)) {
+      const free = hotbar.contents.findIndex((block) => bag.count(block) === 0);
+      if (free >= 0) hotbar.setSlot(free, recipe.output);
+    }
+    celebrate(journal.crafted());
   };
   inventory.onClose = () => {
     setInventory(false);
@@ -379,6 +461,7 @@ function boot(): void {
     : null;
   let touchVisible = false;
   touchControls?.setFlying(player.isFlying);
+  applyMode();
 
   // ---- menu and settings ----
   const menu = new Menu(menuRoot, settings, {
@@ -388,6 +471,12 @@ function boot(): void {
     onLanguageChange: () => {
       persist();
       window.location.reload();
+    },
+    mode,
+    onModeChange: (next) => {
+      mode = next;
+      applyMode();
+      persist();
     },
     canUsePost: webgl?.supportsPost ?? false,
     onClick: () => {
@@ -448,7 +537,7 @@ function boot(): void {
     menu.markStarted();
   };
   player.onPause = () => {
-    inventory.setOpen(false);
+    inventory.hide();
     interaction.enabled = true;
     menu.show("main");
     sound.setPaused(true);
@@ -610,6 +699,18 @@ function boot(): void {
     hotbar: () => [...hotbar.contents],
     flying: () => player.isFlying,
     inventoryOpen: () => inventory.isOpen,
+    gameMode: () => mode,
+    setMode: (next) => {
+      if (next !== "creative" && next !== "adventure") return;
+      mode = next;
+      applyMode();
+    },
+    bag: () => bag.toJSON(),
+    give: (block, amount) => {
+      bag.add(block as BlockId, amount);
+    },
+    discoveries: () => journal.toJSON().found,
+    digging: () => interaction.digProgress?.fraction ?? 0,
     settings: () => ({ ...settings.values }),
     setWeather: (overcast, amount = 0) => {
       forcedWeather = overcast === null ? null : { overcast, rain: amount };
@@ -629,6 +730,7 @@ function boot(): void {
 
   let lastTime = performance.now();
   let lastSave = lastTime;
+  let lastLook = lastTime;
   const frame = (time: number): void => {
     const frameDelta = time - lastTime;
     const dt = Math.min(frameDelta / 1000, 0.1); // clamp to avoid a huge step after a tab switch
@@ -690,6 +792,16 @@ function boot(): void {
       chunkMeshes.pump();
     }
 
+    interaction.update(dt);
+    const digging = interaction.digProgress;
+    if (digVeil) {
+      digVeil.visible = digging !== null;
+      if (digging) {
+        digVeil.position.set(digging.x + 0.5, digging.y + 0.5, digging.z + 0.5);
+        (digVeil.material as THREE.MeshBasicMaterial).opacity = 0.12 + 0.5 * digging.fraction;
+      }
+    }
+
     const hit = player.isActive && !inventory.isOpen ? interaction.raycastFromCamera() : null;
     if (highlight) {
       highlight.visible = hit !== null;
@@ -722,6 +834,24 @@ function boot(): void {
       rain: weather.rain,
       sheltered,
     });
+
+    // The journal looks around about once a second.
+    if (player.isActive && time - lastLook > 1000) {
+      lastLook = time;
+      const here = sampleColumn(Math.floor(player.position.x), Math.floor(player.position.z));
+      celebrate(
+        journal.observe({
+          biome: here.biome,
+          y: player.position.y,
+          underground: caveFactor > 0.5,
+          swimming: underwater,
+          flying: player.isFlying,
+          night: environment.night,
+          rain: weather.rain,
+          snowing: here.frozen || here.isSnowy,
+        }),
+      );
+    }
 
     if (time - lastSave > SAVE_INTERVAL_MS && player.isActive) {
       lastSave = time;

@@ -30,6 +30,9 @@ export interface MenuHandlers {
   readonly t: Translator;
   /** The language setting changed: the page reloads to apply it. */
   readonly onLanguageChange: () => void;
+  /** The current world's game mode, and what to do when it's switched. */
+  readonly mode: "creative" | "adventure";
+  readonly onModeChange: (mode: "creative" | "adventure") => void;
 }
 
 type Screen = "main" | "settings" | "world";
@@ -261,6 +264,38 @@ export class Menu {
     screen.dataset.screen = "world";
     screen.append(el("h2", undefined, this.t("worlds")));
     screen.append(el("p", "panel-hint", this.t("worldsIntro", { seed: this.handlers.seed })));
+
+    // Game mode for this world: switchable at any time, nothing is lost.
+    const modes = el("div", "segmented");
+    const hint = el("p", "mode-hint");
+    let current = this.handlers.mode;
+    const modeButtons: HTMLButtonElement[] = [];
+    const showMode = (): void => {
+      modeButtons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.mode === current);
+      });
+      hint.textContent = this.t(current === "adventure" ? "modeAdventureHint" : "modeCreativeHint");
+    };
+    for (const mode of ["creative", "adventure"] as const) {
+      const button = el(
+        "button",
+        undefined,
+        this.t(mode === "adventure" ? "modeAdventure" : "modeCreative"),
+      );
+      button.type = "button";
+      button.dataset.mode = mode;
+      button.addEventListener("click", () => {
+        current = mode;
+        showMode();
+        this.handlers.onModeChange(mode);
+      });
+      modeButtons.push(button);
+      modes.appendChild(button);
+    }
+    showMode();
+    const modeRow = el("div", "setting-row");
+    modeRow.append(el("span", "setting-name", this.t("mode")), modes);
+    screen.append(modeRow, hint);
 
     const form = el("form", "seed-form");
     const input = el("input");

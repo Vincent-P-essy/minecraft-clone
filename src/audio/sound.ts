@@ -244,6 +244,13 @@ export class SoundEngine {
     this.burst({ frequency: 700, q: 0.4, duration: 0.5, gain: 0.5 }, 1, 0.6, 0.22);
   }
 
+  /** A small rising chime for a new journal entry. */
+  discover(): void {
+    [660, 880, 1320].forEach((frequency, i) => {
+      this.tone(frequency, 0.32, 0.07, "triangle", 1, i * 0.09);
+    });
+  }
+
   click(): void {
     this.tone(880, 0.05, 0.06, "triangle", 1.25);
   }

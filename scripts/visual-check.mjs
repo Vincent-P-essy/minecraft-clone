@@ -774,6 +774,107 @@ try {
   }
   await offlinePage.close();
 
+  // =====================================================================
+  // 7. Adventure mode: dig for blocks, craft, keep a journal
+  // =====================================================================
+  const adventure = await openPage("adventure", `${pageUrl(707)}&mode=adventure`);
+  await waitForWorld(adventure, 25);
+  await adventure.click("#play-button");
+  await sleep(800);
+  const startMode = await adventure.evaluate(() => ({
+    mode: window.__mc.gameMode(),
+    bag: window.__mc.bag(),
+    counts: document.querySelectorAll(".hotbar-count").length,
+  }));
+  report(
+    "Adventure starts with an empty bag and counted hotbar slots",
+    startMode.mode === "adventure" &&
+      Object.keys(startMode.bag).length === 0 &&
+      startMode.counts === 9,
+    JSON.stringify(startMode),
+  );
+
+  // Digging takes time: hold the button on the ground until it gives way.
+  await adventure.evaluate(() => {
+    document.dispatchEvent(new MouseEvent("mousemove", { movementX: 0, movementY: 2000 }));
+  });
+  await sleep(500);
+  const ground = await adventure.evaluate(() => {
+    const p = window.__mc.position();
+    const x = Math.floor(p.x);
+    const z = Math.floor(p.z);
+    return { x, y: Math.floor(p.y) - 1, z, id: window.__mc.blockAt(x, Math.floor(p.y) - 1, z) };
+  });
+  await adventure.mouse.down({ button: "left" });
+  await sleep(150);
+  const partWay = await adventure.evaluate((g) => window.__mc.blockAt(g.x, g.y, g.z), ground);
+  const dug = await until(adventure, (g) => window.__mc.blockAt(g.x, g.y, g.z) === 0, ground);
+  await adventure.mouse.up({ button: "left" });
+  const afterDig = await adventure.evaluate(() => window.__mc.bag());
+  const gathered = Object.values(afterDig).reduce((a, b) => a + b, 0);
+  report(
+    "holding the button digs through the ground, and the blocks land in the bag",
+    partWay === ground.id && dug && gathered >= 1,
+    `ground id ${ground.id} still there at first: ${partWay === ground.id}, bag ${JSON.stringify(afterDig)}`,
+  );
+
+  // Flight is a Creative thing.
+  await adventure.keyboard.press("Space");
+  await sleep(60);
+  await adventure.keyboard.press("Space");
+  await sleep(300);
+  const tookFlight = await adventure.evaluate(() => window.__mc.flying());
+  report("double-tapping jump does not take off in Adventure", tookFlight === false);
+
+  // Crafting: two logs in the bag, one becomes four planks.
+  await adventure.evaluate(() => window.__mc.give(6, 2));
+  await adventure.keyboard.press("KeyE");
+  await sleep(400);
+  await adventure.click('.tab[data-tab="craft"]');
+  await sleep(200);
+  await adventure.screenshot({ path: path.join(OUT_DIR, "13-crafting.png") });
+  const disabledBefore = await adventure.evaluate(
+    () => document.querySelector('.recipe[data-recipe="lantern"]')?.disabled ?? null,
+  );
+  await adventure.click('.recipe[data-recipe="planks-oak"]');
+  await sleep(300);
+  const afterCraft = await adventure.evaluate(() => window.__mc.bag());
+  report(
+    "a recipe turns one log into four planks, and unaffordable recipes are disabled",
+    afterCraft["6"] === 1 && afterCraft["14"] === 4 && disabledBefore === true,
+    JSON.stringify(afterCraft),
+  );
+
+  await adventure.click('.tab[data-tab="journal"]');
+  await sleep(200);
+  await adventure.screenshot({ path: path.join(OUT_DIR, "14-journal.png") });
+  const found = await adventure.evaluate(() => ({
+    list: window.__mc.discoveries(),
+    shown: document.querySelectorAll(".journal-entry.found").length,
+  }));
+  report(
+    "the journal records the first dig and the first craft",
+    found.list.includes("first-dig") && found.list.includes("craft") && found.shown >= 2,
+    JSON.stringify(found.list),
+  );
+
+  await adventure.keyboard.press("KeyE");
+  await sleep(300);
+  await adventure.evaluate(() => document.exitPointerLock());
+  await sleep(400);
+  await adventure.reload({ waitUntil: "domcontentloaded" });
+  await waitForWorld(adventure, 9);
+  const kept = await adventure.evaluate(() => ({
+    bag: window.__mc.bag(),
+    found: window.__mc.discoveries().length,
+  }));
+  report(
+    "the bag and the journal survive a reload",
+    kept.bag["14"] === 4 && kept.found >= 2,
+    JSON.stringify(kept),
+  );
+  await adventure.close();
+
   // ---- console stayed clean ----
   const realErrors = consoleErrors.filter((e) => !e.includes("favicon"));
   report("no console errors", realErrors.length === 0, realErrors.slice(0, 3).join(" | "));

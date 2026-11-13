@@ -267,7 +267,17 @@ export class PlayerController {
     }
   }
 
-  toggleFlight(): void {
+  /** Adventure mode keeps both feet on the ground. */
+  flightAllowed = true;
+
+  /** Turns flight on or off for the current game mode. */
+  setFlightAllowed(allowed: boolean): void {
+    this.flightAllowed = allowed;
+    if (!allowed && this.flying) this.toggleFlight(true);
+  }
+
+  toggleFlight(force = false): void {
+    if (!this.flightAllowed && !this.flying && !force) return;
     this.flying = !this.flying;
     this.state = { ...this.state, velocity: { x: 0, y: 0, z: 0 } };
     this.onFlightChange?.(this.flying);

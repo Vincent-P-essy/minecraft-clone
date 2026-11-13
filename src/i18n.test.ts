@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   createTranslator,
   detectLocale,
+  hasDiscoveryName,
   hasFrenchBlockName,
   LOCALES,
   resolveLocale,
   TEXT_KEYS,
 } from "./i18n";
+import { DISCOVERIES } from "./game/discoveries";
 import { BLOCKS } from "./world/blocks";
 
 describe("detectLocale", () => {
@@ -70,5 +72,15 @@ describe("translations", () => {
     }
     expect(fr.block("lantern")).toBe("lanterne");
     expect(fr.block("something new")).toBe("something new");
+  });
+
+  it("names every journal discovery in every language", () => {
+    for (const locale of LOCALES) {
+      const t = createTranslator(locale);
+      for (const discovery of DISCOVERIES) {
+        expect(hasDiscoveryName(locale, discovery.id)).toBe(true);
+        expect(t.discovery(discovery.id)).not.toBe(discovery.id);
+      }
+    }
   });
 });

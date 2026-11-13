@@ -55,6 +55,28 @@ export class BlockInteraction {
   onEdit: ((edit: EditEvent) => void) | undefined;
   /** Set false while a menu is open so clicks don't reach the world. */
   enabled = true;
+  /** Adventure mode: how long a block takes to dig (seconds). When unset,
+   * or when it returns 0, blocks break at once. */
+  digSeconds: ((block: BlockId) => number) | undefined;
+  /** Adventure mode: whether the player actually has this block to place. */
+  canPlace: ((block: BlockId) => boolean) | undefined;
+  /** Fired a few times a second while digging, for the tapping sound. */
+  onDigTick: ((block: BlockId) => void) | undefined;
+
+  /** The block being dug, how far along it is, and whether the dig keeps
+   * going by itself (a tap or a trigger pull) or only while a button is
+   * held (the mouse). */
+  private dig: {
+    x: number;
+    y: number;
+    z: number;
+    block: BlockId;
+    elapsed: number;
+    needed: number;
+    auto: boolean;
+    tick: number;
+  } | null = null;
+  private holding = false;
 
   constructor(
     camera: THREE.PerspectiveCamera,
@@ -77,6 +99,12 @@ export class BlockInteraction {
         if (e.button === 1) {
           this.pickTargetedBlock();
           e.preventDefault();
+          return;
+        }
+        if (e.button === 0 && this.digSeconds) {
+          // Timed digging: the button is held, update() does the rest.
+          this.holding = true;
+          this.beginDig(false);
           return;
         }
         const action =
@@ -107,6 +135,10 @@ export class BlockInteraction {
 
     document.addEventListener("mouseup", (e) => {
       this.stopRepeat();
+      if (e.button === 0) {
+        this.holding = false;
+        if (this.dig && !this.dig.auto) this.dig = null;
+      }
       if (!this.controller.isActive || this.controller.isLocked || !this.enabled) return;
       if (e.button === 0 && this.tapStart) {
         const moved = Math.hypot(e.clientX - this.tapStart.x, e.clientY - this.tapStart.y);
@@ -131,6 +163,76 @@ export class BlockInteraction {
     }
   }
 
+  /** Starts digging whatever is under the crosshair. Returns false if
+   * there's nothing there that can be dug. */
+  private beginDig(auto: boolean): boolean {
+    const hit = this.raycastFromCamera();
+    if (!hit) return false;
+    const block = this.world.getBlock(hit.blockX, hit.blockY, hit.blockZ);
+    if (!BLOCKS[block].breakable) return false;
+    const same =
+      this.dig?.x === hit.blockX && this.dig.y === hit.blockY && this.dig.z === hit.blockZ;
+    if (same && this.dig) {
+      this.dig.auto = this.dig.auto || auto;
+      return true;
+    }
+    const needed = this.digSeconds?.(block) ?? 0;
+    if (!Number.isFinite(needed)) return false;
+    this.dig = {
+      x: hit.blockX,
+      y: hit.blockY,
+      z: hit.blockZ,
+      block,
+      elapsed: 0,
+      needed,
+      auto,
+      tick: 0,
+    };
+    return true;
+  }
+
+  /** Advances a dig in progress. Call once a frame. */
+  update(dt: number): void {
+    const dig = this.dig;
+    if (!dig) return;
+    if (!this.enabled || !this.controller.isActive) {
+      this.dig = null;
+      return;
+    }
+    // Looking away abandons the block; with the button still down, the
+    // next one under the crosshair is started straight away.
+    const hit = this.raycastFromCamera();
+    const onTarget =
+      hit !== null && hit.blockX === dig.x && hit.blockY === dig.y && hit.blockZ === dig.z;
+    if (!onTarget || this.world.getBlock(dig.x, dig.y, dig.z) !== dig.block) {
+      this.dig = null;
+      if (this.holding) this.beginDig(false);
+      return;
+    }
+    dig.elapsed += dt;
+    dig.tick -= dt;
+    if (dig.tick <= 0) {
+      dig.tick = 0.22;
+      this.onDigTick?.(dig.block);
+    }
+    if (dig.elapsed < dig.needed) return;
+    this.dig = null;
+    this.breakAt(dig.x, dig.y, dig.z);
+    if (this.holding) this.beginDig(false);
+  }
+
+  /** The dig in progress, for the overlay: which block, and 0..1 done. */
+  get digProgress(): { x: number; y: number; z: number; fraction: number } | null {
+    const dig = this.dig;
+    if (!dig) return null;
+    return {
+      x: dig.x,
+      y: dig.y,
+      z: dig.z,
+      fraction: dig.needed > 0 ? Math.min(1, dig.elapsed / dig.needed) : 1,
+    };
+  }
+
   raycastFromCamera(maxDistance = REACH): RaycastHit | null {
     const origin: Vec3 = {
       x: this.camera.position.x,
@@ -151,19 +253,28 @@ export class BlockInteraction {
     this.onEdit?.({ x, y, z, id, previous });
   }
 
-  /** Break the block under the crosshair. Public: the touch controls call
-   * this directly (tap), bypassing the mouse-event plumbing. */
+  /** Break the block under the crosshair. Public: the touch controls and
+   * the gamepad call this directly. With timed digging on, it starts (or
+   * keeps up) a dig that finishes by itself; otherwise the block goes at
+   * once. */
   breakTargetedBlock(): void {
+    if (this.digSeconds) {
+      this.beginDig(true);
+      return;
+    }
     const hit = this.raycastFromCamera();
     if (!hit) return;
-    const current = this.world.getBlock(hit.blockX, hit.blockY, hit.blockZ);
-    if (!BLOCKS[current].breakable) return;
+    this.breakAt(hit.blockX, hit.blockY, hit.blockZ);
+  }
 
-    this.setBlock(hit.blockX, hit.blockY, hit.blockZ, BlockId.AIR);
+  private breakAt(x: number, y: number, z: number): void {
+    const current = this.world.getBlock(x, y, z);
+    if (!BLOCKS[current].breakable) return;
+    this.setBlock(x, y, z, BlockId.AIR);
     // A plant can't hang in the air once its ground is gone.
-    if (hit.blockY + 1 < CHUNK_HEIGHT) {
-      const above = this.world.getBlock(hit.blockX, hit.blockY + 1, hit.blockZ);
-      if (isPlant(above)) this.setBlock(hit.blockX, hit.blockY + 1, hit.blockZ, BlockId.AIR);
+    if (y + 1 < CHUNK_HEIGHT) {
+      const above = this.world.getBlock(x, y + 1, z);
+      if (isPlant(above)) this.setBlock(x, y + 1, z, BlockId.AIR);
     }
   }
 
@@ -173,6 +284,7 @@ export class BlockInteraction {
     const hit = this.raycastFromCamera();
     if (!hit) return;
     const block = this.selection.selectedBlock;
+    if (this.canPlace && !this.canPlace(block)) return;
 
     // Aiming at a tuft of grass replaces it rather than stacking beside it.
     const target = this.world.getBlock(hit.blockX, hit.blockY, hit.blockZ);

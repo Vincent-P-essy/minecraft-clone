@@ -29,6 +29,8 @@ export class Hotbar {
   onChange: (() => void) | undefined;
   /** Set false while a menu is open so keys and scroll don't reach it. */
   enabled = true;
+  /** Adventure mode: how many of a block the player holds (null = unlimited). */
+  private counts: ((block: BlockId) => number) | null = null;
 
   constructor(
     container: HTMLElement,
@@ -79,6 +81,35 @@ export class Hotbar {
     key.textContent = (index + 1).toString();
     slot.append(key, renderBlockIcon(this.atlas, block, ICON_SIZE));
     slot.title = this.blockName(BLOCKS[block].name);
+    if (this.counts) {
+      const held = this.counts(block);
+      const badge = document.createElement("span");
+      badge.className = "hotbar-count";
+      badge.textContent = held.toString();
+      slot.appendChild(badge);
+      slot.classList.toggle("empty", held === 0);
+    } else {
+      slot.classList.remove("empty");
+    }
+  }
+
+  /** Shows a count on each slot (Adventure), or none (Creative). */
+  setCounts(counts: ((block: BlockId) => number) | null): void {
+    this.counts = counts;
+    this.refresh();
+  }
+
+  /** Redraws every slot (after the bag changes). */
+  refresh(): void {
+    for (let i = 0; i < HOTBAR_SLOTS; i++) this.renderSlot(i);
+  }
+
+  /** Puts a block in a specific slot. */
+  setSlot(index: number, block: BlockId): void {
+    if (index < 0 || index >= HOTBAR_SLOTS) return;
+    this.slots[index] = block;
+    this.renderSlot(index);
+    this.onChange?.();
   }
 
   select(index: number): void {

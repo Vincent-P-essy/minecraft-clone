@@ -149,6 +149,25 @@ canvas {
   display: none !important;
 }
 
+.hotbar-count,
+.cell-count {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow:
+    0 1px 2px #000,
+    0 0 3px #000;
+  pointer-events: none;
+}
+
+.hotbar-slot.empty canvas {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+
 /* --- Toast and stats --- */
 #toast {
   position: fixed;
@@ -509,6 +528,137 @@ kbd {
 
 .inventory-cell:active {
   transform: scale(0.94);
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink-dim);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.tab.active {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+
+.inventory-cell {
+  position: relative;
+}
+
+.recipe-list,
+.journal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recipe {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.recipe:not(:disabled):hover {
+  border-color: var(--accent);
+  background: rgba(255, 196, 90, 0.16);
+}
+
+.recipe:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.recipe-side {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.recipe-item {
+  position: relative;
+  width: 46px;
+  height: 46px;
+}
+
+.recipe-item canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.recipe-item.short .cell-count {
+  color: var(--danger);
+}
+
+.recipe-arrow {
+  font-size: 20px;
+  opacity: 0.7;
+}
+
+.journal-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+.journal-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 9px;
+  text-align: left;
+}
+
+.journal-entry.found {
+  color: var(--ink);
+  background: rgba(255, 196, 90, 0.14);
+}
+
+.journal-icon {
+  width: 24px;
+  text-align: center;
+  font-size: 18px;
+}
+
+.journal-progress {
+  margin: 0;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.mode-hint {
+  margin: -4px 0 4px;
+  font-size: 0.82rem;
+  color: var(--ink-dim);
 }
 
 /* --- Touch controls --- */

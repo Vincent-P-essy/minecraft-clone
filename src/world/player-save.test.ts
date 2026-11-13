@@ -23,6 +23,9 @@ const save: PlayerSave = {
   time: 321,
   hotbar: [1, 2, 3, 14, 6, 17, 18, 16, 4],
   slot: 6,
+  mode: "adventure",
+  bag: { "2": 5 },
+  journal: { found: ["night"], placed: 3 },
 };
 
 describe("player save", () => {
@@ -64,6 +67,16 @@ describe("player save", () => {
     const loaded = loadPlayerSave(storage, 1);
     expect(loaded?.slot).toBe(8);
     expect(loaded?.hotbar).toEqual([]);
+  });
+
+  it("defaults to creative mode for older saves or an unknown mode", () => {
+    const storage = memory();
+    const older: Record<string, unknown> = { ...save };
+    delete older.mode;
+    storage.data.set(playerSaveKey(1), JSON.stringify(older));
+    expect(loadPlayerSave(storage, 1)?.mode).toBe("creative");
+    storage.data.set(playerSaveKey(1), JSON.stringify({ ...save, mode: "hardcore" }));
+    expect(loadPlayerSave(storage, 1)?.mode).toBe("creative");
   });
 
   it("never throws when storage refuses the write", () => {

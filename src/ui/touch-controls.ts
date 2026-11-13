@@ -183,6 +183,12 @@ export class TouchControls {
     }
   }
 
+  /** Adventure mode has no flight: the wing button goes away. */
+  setFlightAllowed(allowed: boolean): void {
+    this.flyButton.style.display = allowed ? "flex" : "none";
+    if (!allowed) this.setFlying(false);
+  }
+
   /** Flight shows a "descend" button and lights up the wing. */
   setFlying(flying: boolean): void {
     this.descendButton.style.display = flying ? "flex" : "none";
