@@ -46,8 +46,11 @@ jobs:
             desktop/release/*.deb
           if-no-files-found: error
 
+  # The Play Store bundle. Signed when the upload keystore is configured as
+  # secrets (see docs/play-store.md); unsigned otherwise.
   android:
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
@@ -67,16 +70,28 @@ jobs:
       - name: Install (shell)
         working-directory: mobile
         run: npm ci
-      - name: Generate and sync the Android project
+      - name: Copy the game into the Android project
         working-directory: mobile
+        run: npx cap sync android
+      - name: Restore the upload keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          npx cap add android
-          npx cap sync android
-      - name: Assemble a debug APK
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+            echo "path=$RUNNER_TEMP/upload.jks" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the release bundle (.aab)
         working-directory: mobile/android
-        run: ./gradlew assembleDebug
+        env:
+          LUMENWILD_KEYSTORE: ${{ steps.keystore.outputs.path }}
+          LUMENWILD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LUMENWILD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LUMENWILD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon bundleRelease
       - uses: actions/upload-artifact@v4
         with:
-          name: android-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          name: android-release-bundle
+          path: mobile/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error

@@ -6,13 +6,13 @@ checklist only the publisher can complete.
 
 ## What you can build today
 
-| Target                  | Command                                                                                     | Output                           |
-| ----------------------- | ------------------------------------------------------------------------------------------- | -------------------------------- |
-| Web (any host)          | `npm run build`                                                                             | `dist/` — static files           |
-| Web (GitHub Pages)      | pushed to `main` → `pages.yml`                                                              | the live site                    |
-| Windows / macOS / Linux | `npm run build:native && cd desktop && npm ci && npm run dist`                              | installers in `desktop/release/` |
-| Android                 | `npm run build:native && cd mobile && npm ci && npx cap add android && npm run android:apk` | a debug APK                      |
-| iOS                     | same, with `npx cap add ios && npm run ios:open` on a Mac                                   | an Xcode project                 |
+| Target                  | Command                                                              | Output                           |
+| ----------------------- | -------------------------------------------------------------------- | -------------------------------- |
+| Web (any host)          | `npm run build`                                                      | `dist/` — static files           |
+| Web (GitHub Pages)      | pushed to `main` → `pages.yml`                                       | the live site                    |
+| Windows / macOS / Linux | `npm run build:native && cd desktop && npm ci && npm run dist`       | installers in `desktop/release/` |
+| Android                 | `npm run build:native && cd mobile && npm ci && npm run android:apk` | a debug APK                      |
+| iOS                     | same, with `npx cap add ios && npm run ios:open` on a Mac            | an Xcode project                 |
 
 The **Release builds** workflow (`.github/workflows/release.yml`, run by
 hand from the Actions tab) does the desktop builds on all three operating
@@ -20,6 +20,10 @@ systems and the Android debug APK, and attaches them to the run.
 
 `build:native` differs from `build` in one way: every URL in the bundle is
 relative, so the game loads from disk inside a shell.
+
+For Google Play specifically — the Android project, the signed bundle,
+the store listing, the privacy policy and the Families declarations — see
+the step-by-step guide in [`play-store.md`](play-store.md) (in French).
 
 ## Before you sell it
 

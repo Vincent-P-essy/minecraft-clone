@@ -48,6 +48,8 @@ const SAVE_INTERVAL_MS = 4000;
 // pixels, and stage a shot (time of day, vantage point) for screenshots.
 declare global {
   interface Window {
+    /** Called by the Android shell's back button; true = handled here. */
+    __nativeBack?: () => boolean;
     __mc?: {
       position: () => { x: number; y: number; z: number };
       blockAt: (x: number, y: number, z: number) => number;
@@ -471,6 +473,20 @@ function boot(): void {
       const p = player.position;
       if (entering) particles?.splash(p.x, Math.floor(p.y) + 0.9, p.z);
     },
+  };
+
+  // Android's back button: close what's open, then pause; only from the
+  // menu does it leave the app (the shell sends it to the background).
+  window.__nativeBack = () => {
+    if (inventory.isOpen) {
+      setInventory(false);
+      return true;
+    }
+    if (player.isActive) {
+      player.releaseControl();
+      return true;
+    }
+    return false;
   };
 
   window.addEventListener("keydown", (e) => {

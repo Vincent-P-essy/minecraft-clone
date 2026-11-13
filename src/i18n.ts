@@ -14,6 +14,7 @@ const EN = {
   worlds: "Worlds",
   fullscreen: "Fullscreen",
   back: "Back",
+  privacy: "Privacy",
   hintDesktop:
     "<kbd>WASD</kbd> move &middot; <kbd>Space</kbd> jump (twice to fly) &middot; <kbd>Shift</kbd> sprint<br />" +
     "<kbd>Left click</kbd> break &middot; <kbd>Right click</kbd> place &middot; <kbd>Middle click</kbd> pick<br />" +
@@ -68,6 +69,7 @@ const FR: Record<TextKey, string> = {
   worlds: "Mondes",
   fullscreen: "Plein écran",
   back: "Retour",
+  privacy: "Confidentialité",
   hintDesktop:
     "<kbd>ZQSD</kbd> se déplacer &middot; <kbd>Espace</kbd> sauter (deux fois : voler) &middot; <kbd>Maj</kbd> courir<br />" +
     "<kbd>Clic gauche</kbd> casser &middot; <kbd>Clic droit</kbd> poser &middot; <kbd>Clic molette</kbd> copier<br />" +

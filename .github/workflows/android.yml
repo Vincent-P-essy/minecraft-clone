@@ -1,0 +1,60 @@
+name: Android
+
+# Builds an installable debug APK whenever the game or its Android shell
+# changes, on any branch, and keeps it as a downloadable artifact — the
+# quickest way to try a build on a real phone.
+on:
+  push:
+    paths:
+      - "mobile/**"
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.ts"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install (game)
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+      - name: Build (game, relative URLs)
+        run: npm run build:native
+      - name: Install (shell)
+        working-directory: mobile
+        run: npm ci
+      - name: Copy the game into the Android project
+        working-directory: mobile
+        run: npx cap sync android
+      - name: Assemble the debug APK
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumenwild-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

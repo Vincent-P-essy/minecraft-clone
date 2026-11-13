@@ -12,6 +12,7 @@ export default defineConfig(
       "desktop/release/**",
       "mobile/node_modules/**",
       "mobile/android/**",
+      "store/**",
       "mobile/ios/**",
     ],
   },

@@ -33,5 +33,4 @@ visual-check/
 desktop/node_modules
 desktop/release
 mobile/node_modules
-mobile/android
 mobile/ios
